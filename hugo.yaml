@@ -1,0 +1,55 @@
+# Basic configuration
+baseURL: "https://blog.rhanqtl.com/"
+languageCode: "zh-cn"
+title: rhanqtl
+theme: PaperMod
+
+# Navigation bar related configuration
+sectionPagesMenu: main
+
+# Content related configuration
+
+markup:
+  tableOfContents:
+    startLevel: 2
+    endLevel: 3
+    ordered: true
+
+  asciidocExt:
+    preserveTOC: false
+    attributes:
+      toc: left
+      toclevels: '4'
+
+security:
+  exec:
+    allow:
+      - ^(dart-)?sass(-embedded)?$
+      - ^go$
+      - ^npx$
+      - ^postcss$
+      - ^asciidoctor$
+
+params:
+  ShowToc: true
+  ShowBreadCrumbs: true
+
+  social:
+    - github: rhanqtl
+      twitter: rhanqtl
+
+  fuseOpts:
+    isCaseSensitive: false
+    includeMatches: true
+    shouldSort: true
+    location: 0
+    distance: 1000
+    threshold: 0.4
+    minMatchCharLength: 0
+    keys: ["title", "permalink", "summary", "content", "tags", "categories"]
+
+outputs:
+  home:
+    - HTML
+    - RSS
+    - JSON
