@@ -1,0 +1,6 @@
+---
+menus:
+  main:
+    name: "系列文章"
+    weight: 10
+---

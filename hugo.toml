@@ -1,0 +1,30 @@
+baseURL = 'https://blog.rhanqtl.com/'
+languageCode = 'en-us'
+title = "rhanqtl"
+
+theme = "PaperMod"
+
+# Navigation bar related configuration
+sectionPagesMenu = "main"
+
+# Content related configuration
+[markup.tableOfContents]
+startLevel = 2
+endLevel = 3
+ordered = true
+
+[markup.asciidocExt.attributes]
+sectnums = ""
+# toc = "left"
+# attribute=nofooter
+# font-family = "Inconsolata"
+# icons = "font"
+# source-highlighter = "pygments"
+
+#
+[security.exec]
+allow = ['^(dart-)?sass(-embedded)?$', '^go$', '^npx$', '^postcss$', '^asciidoctor$']
+
+[[params.social]]
+github = "rhanqtl"
+twitter = "rhanqtl"
