@@ -1,0 +1,156 @@
+---
+title: "第 2 讲：面向对象编程"
+summary: "讲解面向对象编程（Object-Oriented Programming）的知识"
+---
+
+== 引言
+
+“面向对象编程”实际是上一个不太好的翻译，因为“对象”这个词的含义太模糊，曾经在网络上看到有人建议翻译成“面向组件编程”，相比之下更合适。
+
+OOP 实际上有两种范式：
+
+* 一种是在 $$C++$$、Java 这类语言中的基于__类__的
+* 一种是在 Ruby 这类语言中基于__对象__的
+
+NOTE: “基于对象”并不是说就没有类了，可是说可以基于单个对象进行更细粒度的控制。例如，在 Ruby 中，访问控制符 `private` 表示这个成员只有当前对象能够直接访问，其他对象（哪怕是同一个类的）必须通过公开接口访问。再例如，Ruby 中可以仅扩展单个对象的能力。
+
+基本结构在《第一讲：快速入门》已经介绍过了，不再赘述。
+
+== 运算符重载
+
+假设现在我们实现了一个 `int128_t` 类，想要让它可以像基础类型那样进行 `+` `-` `*` `/` 运算：
+
+[source,c++]
+----
+class int128_t {
+public:
+    int128_t(uint64_t v): lsw_{v} {}
+
+    int128_t operator+(const int128_t &rhs) const {
+        auto &lhs = *this;
+    }
+
+    int128_t &operator++() {
+
+    }
+    int128_t operator++(int) {
+
+    }
+
+ private:
+   uint32_t words_[4]{};
+};
+----
+
+看上去运算符重载仅仅是语法糖，实际上它的作用要更大。例如在模板中，我们需要一个类的两个对象能够加起来，如果没有运算符重载，我们就必须：
+
+[source,c++]
+----
+template <typename Add>
+void foo(const Add &lhs, const Add &rhs) {
+    auto res = lhs.add(rhs);
+}
+----
+
+这样就有了一个问题：基础类型是没有 `.add` 这种操作的，想要让这个模板能够支持基础类型，我们必须创建一个新的类：
+
+[source,c++]
+----
+class Int32 {
+ public:
+  Int32(int v);
+
+ public:
+  Int32 add(Int32 rhs) const;
+  Int32 sub(Int32 rhs) const;
+  Int32 mul(Int32 rhs) const;
+  // ... re-implement all operators `int` provides.
+};
+----
+
+这无疑是非常痛苦的。
+
+NOTE: 有 Java 经验的人这时候应该会想到 Java 的“装箱类”，
+
+== 继承
+
+[source,c++]
+----
+class Shape {
+    virtual double area() = 0;
+};
+
+// Square should not be a derived class of Rectangle, which is a classic
+// LSP problem.
+class Rectangle final : public Shape {
+    double area() override {
+
+    }
+
+    private:
+    double h_, w_;
+};
+
+class Circle final : public Shape {
+    double area() override {}
+};
+
+----
+
+== Pimpl 模式
+
+[source,c++]
+----
+// intf.h
+class JustInterfaces {
+    struct Impl;
+
+    private:
+    Impl *impl_;
+};
+----
+
+此处由于 `Impl` 是一个“incomplete type”，所以必须用指针。
+
+[source,c++]
+----
+// intf.cc
+struct JustInterfaces::Impl {};
+----
+
+
+信息隐藏，加快编译速度
+
+缺点是，每次访问数据成员都要有一个间接访问的开销。
+
+== 虚继承
+
+实际上还有另外一种方式可以实现 pimpl 的功能，但是一般“不符合OOP设计原则”，这种方式就是私有继承：
+
+[source,c++]
+----
+// vec_impl.h
+template <typename T>
+struct VecImpl {
+    T *data_;
+    std::size_t len_;
+    std::size_t cap_;
+};
+----
+
+[source,c++]
+----
+template <typename T>
+class Vec : private VecImpl {
+ public:
+  Vec();
+  // ... ctors
+
+ public:
+  T &at(size_type i);
+
+  bool empty() const;
+};
+----
+
+这样没有了间接访问的开销，同时我们也可以确保 VecImpl 没有虚函数，从而可以避免影响对象的内存布局（见《第六讲：对象模型》）。
