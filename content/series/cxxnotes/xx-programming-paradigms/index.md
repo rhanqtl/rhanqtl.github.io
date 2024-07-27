@@ -9,14 +9,17 @@ summary: "本文介绍各种常见的编程范式，并展示它们在 C++ 中�
 
 [source,c++]
 ----
+```c++
 template <typename R>
 int sum(R &&rng) {
+    // 中文
     int ans = 0;
     for (auto el : rng) {
         ans += el;
     }
     return ans;
 }
+```
 ----
 
 

@@ -1,6 +1,6 @@
 ---
+title: "博文"
 menus:
   main:
-    name: "博文"
     weight: 20
 ---

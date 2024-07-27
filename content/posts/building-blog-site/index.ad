@@ -1,0 +1,124 @@
+---
+title: "创建 GitHub Pages 个人博客"
+summary: "使用 Hugo, PaperMod 和 AsciiDoc, 基于 GitHub Pages 创建个人博客"
+---
+
+== 初始化 GitHub 仓库
+
+== 初始化 Hugo
+
+== 初始化 PaperMod 主题
+
+== 改进 AsciiDoc 支持
+
+目前，Hugo 对 AsciiDoc 的支持还不是很完善，我们需要进行一些微调。
+
+=== 代码高亮
+
+从 highlight.js 的官方网站获取到嵌入代码:
+
+image::images/hljs-css.png[]
+
+image::images/hljs-js.png[]
+
+image::images/hljs-link.png[]
+
+将两个链接插入 $$layouts/partials/extend_head.html$$ 中:
+
+[source,html]
+----
+{{- /* Head custom content area start */ -}}
+{{- /*     Insert any custom code (web-analytics, resources, etc.) - it will appear in the <head></head> section of every page. */ -}}
+{{- /*     Can be overwritten by partial with the same name in the global layouts. */ -}}
+
+-- snippet --
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/<version>/styles/base16/<theme>.css" ... />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/<version>/highlight.min.js"
+        onload="hljs.highlightAll()">  <1>
+</script>
+-- snippet --
+
+{{- /* Head custom content area end */ -}}
+----
+<1> 在 highlight.js 提供的 HTML 的基础上增加 ``onload``，在加载 JavaScript 脚本之后对页面中所有代码块进行处理
+
+.代码高亮是如何实现的?
+****
+此处不讨论编译原理相关的内容，仅记录一下 Hugo 是如何基于现有的 API 实现代码高亮的，以 AsciiDoc 为例。
+
+假设有如下的代码块：
+
+[source,c++]
+----
+int main() {
+}
+----
+
+在解析完一个 AsciiDoc 文件后，会生成这样的输出:
+
+[source,html]
+----
+<pre class="highlightjs highlight">
+<code class="language-c++ hljs" data-lang="c++">int main() {
+}
+</code>
+</pre>
+----
+
+``<script>`` 标签令浏览器渲染 HTML 页面时加载 highlight.js 的源代码，``onload`` 属性调用的函数会将页面中所有 `pre code` 元素进行处理，输出:
+
+[source,html]
+----
+<code class="language-c++ hljs language-c" data-lang="c++" data-highlighted="yes">  <1>
+  <span class="hljs-type">int</span>  <2>
+  <span class="hljs-title function_">main</span>
+  <span class="hljs-params">()</span>{
+}</code>
+----
+<1> 增加了 `data-highlighted` 属性，标记当前元素已经处理过了
+<2> 每个 token 都被套上了 `span` 标签，其中 `class` 属性会在 CSS 中出现
+
+我们之前从 highlight.js 获取的 CSS 这时候就派上了用场。
+****
+
+=== 扩展元素
+
+== 美化
+
+一般情况下，代码中中文和英文宽度不对齐，看着很难受，尤其是制作纯文本的表格时。可以用 Inconsolata 和 Noto Sans SC 配合实现对齐效果。
+
+image::images/monospace-fonts.png[]
+
+将 Google Fonts 提供的 HTML 插入到 $$layouts/partials/extend_head.html$$ 中:
+
+[source,html]
+----
+{{- /* Head custom content area start */ -}}
+{{- /*     Insert any custom code (web-analytics, resources, etc.) - it will appear in the <head></head> section of every page. */ -}}
+{{- /*     Can be overwritten by partial with the same name in the global layouts. */ -}}
+
+-- snippet --
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inconsolata&family=Noto+Sans+SC:wght@100..900&display=swap" rel="stylesheet">
+-- snippet --
+
+{{- /* Head custom content area end */ -}}
+----
+
+== 第一篇博文
+
+TIP: AsciiDoc 完全兼容 Markdown 的语法
+
+[source,asciidoc]
+----
+---
+title: "My First Blog Post"
+---
+
+== Section 1
+
+```python
+print("hello, world")
+```
+----

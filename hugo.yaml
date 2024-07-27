@@ -11,15 +11,13 @@ sectionPagesMenu: main
 
 markup:
   tableOfContents:
-    startLevel: 2
-    endLevel: 3
     ordered: true
-
   asciidocExt:
-    preserveTOC: false
     attributes:
       toc: left
       toclevels: '4'
+      icons: font
+      icon-set: fas
 
 security:
   exec:
@@ -33,11 +31,9 @@ security:
 params:
   ShowToc: true
   ShowBreadCrumbs: true
-
   social:
     - github: rhanqtl
       twitter: rhanqtl
-
   fuseOpts:
     isCaseSensitive: false
     includeMatches: true

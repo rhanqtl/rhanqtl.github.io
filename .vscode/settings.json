@@ -3,10 +3,10 @@
         "CXXNOTES"
     ],
     "vim.handleKeys": {
-        "<C-d>": true,
         "<C-s>": true,
         "<C-z>": true,
         "<C-c>": true,
         "<C-v>": true,
+        "<C-x>": true,
     }
 }
