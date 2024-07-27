@@ -1,0 +1,1 @@
+/usr/sbin/c++ CMakeFiles/libfmt_test.dir/libfmt_test.cpp.o -o libfmt_test  -lgtest -lgtest_main 

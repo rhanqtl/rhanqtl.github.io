@@ -1,4 +1,274 @@
 ---
-title: "资源管理"
+title: "第 03 讲：资源管理"
 summary: "在编程过程中，资源管理是相当重要的一部分，狭义上，可以是 C/C++ 这类没有垃圾回收的编程语言中的内存管理，广义上，是对于各种外部交互的管理，包括文件、数据库连接等等"
 ---
+
+== “资源”的定义和所有权
+
+在开始资源管理这个话题之前，我们首先要搞清楚“资源”是个什么概念。实际上，“资源”的定义非常简单：资源就是跟 OS 借的，用完要归还的东西，比如，内存就是非常常见的资源，线程、文件句柄、网络连接也是资源。
+
+这里还涉及到“所有权”的问题。“所有权”这个概念也很好理解，实际上就是资源归属于谁，比如 `std::vector` 申请的内存就归属于相应的对象，换言之，该对象就是这块内存的所有者，当我们通过 `vec.data()` 获取到一个指针或者通过 `vec[i]` 访问其中的元素时，我们就是__借用__了这块内存（的一部分）。
+
+所有权一定可以表示为树形的结构。例如，``std::vector<Point> xs = {{1, 2}, {3, 4}}`` 可以表示为：
+
+----
+xs
+|-- Point
+|   |-- 1
+|   |-- 2
+|-- Point
+    |-- 3
+    |-- 4
+----
+
+== C 语言的资源管理
+
+C 语言中的资源管理要手动完成：
+
+[source,c]
+----
+void foo() {
+    resource_t r = create_resource();
+    int err = use_resource(r);
+    if (err)
+        goto on_error;
+    use_resource_again(r);
+    goto cleanup;
+on_error:
+    report_error(err);
+cleanup:
+    destroy_resource(r);
+}
+----
+
+这种方式有几个问题：
+
+- 最大的问题是，程序员必须记得写 ``goto`` 语句，不然可能会发生一些神奇的事情；
+- 另一个问题是，``goto`` 排列的顺序可能也很有讲究
+- 其三，使用 `goto` 本身在结构化编程中是不被提倡的
+
+TIP: 感兴趣的可以参考 EWD 的文章《Goto Statement Considered Harmful》
+
+实际上还有一种类似的方式：
+
+[source,c]
+----
+void foo() {
+    resource_t r = create_resource();
+    int err = foo_internal(r);
+    if (err)
+        report_error(err);
+    destroy_resource(r);
+}
+
+int foo_internal(resource_t r) {
+    int err = use_resource(r);
+    if (err)
+        return err;
+    use_resource_again(r);
+    return 0;
+}
+----
+
+这样会比较麻烦，而且如果涉及到合并错误码的问题。
+
+如果仅使用 `goto` 语句并且函数规模较小，那么问题通常可以在 code review 阶段发现，但是 C 标准库还提供了另外一种跨函数（栈帧）跳转的机制 —— ``setjmp`` 和 ``longjmp``，该机制类似于 $$C++$$ 中的异常处理，但是原始得多 —— 会导致资源管理进一步变复杂。
+
+// TODO(roberth): setjmp & longjmp
+
+== 内存池案例研究
+
+=== PostgreSQL 的 MemoryContext
+
+用于管理一个 transaction 的内存
+
+=== Clang 的 ASTContext
+
+=== Zig 语言的 allocator 机制
+
+== RAII
+
+$$C++$$ 中一切资源管理机制的基础是 RAII（Resource Acquisition Is Initialization，也可称为 RRID，Resource Release Is Destruction），一般的模式如下：
+
+[source,c++]
+----
+class RAIIGuard {
+  resource_t *_res:
+
+ public:
+  RAIIGuard(resource_t *r): _res{r} /* Set efficiency aside. */ {}
+  ~RAIIGuard() { destroy_resource(_res); }
+  // Copy- and move-ctors/assignment operators are omitted and will be discussed later.
+
+ public:
+  resource_t &operator*() { return *_res; }
+  resource_t *operator->() { return _res; }
+  resource_t *get() { return _res; }
+};
+----
+
+前文的 C 代码就可以改写成：
+
+[source,c]
+----
+void foo() {
+    RAIIGuard r{create_resource()};
+    int err = use_resource(r.get());
+    if (err) {
+        report_error(err);
+        return;
+    }
+    use_resource_again(r);
+}
+----
+
+== 智能指针
+
+前文展示的 `RAIIGuard` 实际上是一种 __智能指针__，但是功能非常简单。$$C++$$ 标准库的 `<memory>` 头文件中为我们提供了几种智能指针。
+
+=== unique_ptr
+
+``std::unique_ptr`` 是最基本的智能指针，它可以用来表示独占所有权。用法：
+
+[source,c++]
+----
+void foo() {
+  std::unique_ptr<int> x1{new int{42}};
+  std::cout << *x1 << '\n';
+
+  auto x2 = std::make_unique<int>(42);
+  std::cout << *x2 << '\n';
+
+  std::unique_ptr<int[]> xs{new int[10]{}};
+  for (std::size_t i = 0; i < 10; i++) {
+    xs[i] = i+1;
+  }
+  std::copy(std::begin(*xs), std::end(*xs), std::ostream_iterator<int>(std::cout), ' ');
+}
+----
+
+在析构时，``unique_ptr`` 默认的行为是调用其所有的对象的析构函数并释放相应的内存，不过我们也可以修改这个行为。
+
+[source,c++]
+----
+void destroy(int *p) {
+  std::cout << std::format("[{}] p={}", __PRETTY_FUNCTION__, p) << '\n';
+  delete p;
+}
+
+void foo() {
+  std::unique_ptr<int, decltype(&destory)> x1{new int{42}, destroy};  // <1>
+
+  auto deleter = [](int *p) {
+    std::cout << std::format("[{}] p={}", __PRETTY_FUNCTION__, p) << '\n';
+    delete p;
+  };
+  std::unique_ptr<int, decltype(deleter)> x2{new int{42}, deleter};
+}
+----
+
+这里需要注意，``Deleter`` 模板参数会影响 `std::unique_ptr` 的大小：如果传入的是一个函数指针，那么 `std::unique_ptr` 就会为 16 字节；而如果传入一个没有捕获任何变量的 lambda，``std::unique_ptr`` 的大小仍然为 8 字节，所以可能的情况下更加推荐使用无变量捕获的 lambda 作为 deleter。
+
+=== shared_ptr
+
+`std::shared_ptr` 用于表达共享所有权：
+
+[source,c++]
+----
+void foo() {
+  std::shared_ptr<int> x{new int{42}};
+  std::cout << x.use_count() << '\n';
+  {
+    std::shared_ptr<int> x_copy = x;
+    std::cout << std::format("{} {}", x.use_count(), x.get() == x_copy.get()) << '\n';
+  }
+  std::cout << x.use_count() << '\n';
+}
+----
+
+与 `std::unique_ptr` 类似，``std::shared_ptr`` 也支持定制 ``Deleter``，但是不需要出现在模板参数中：
+
+[source,c++]
+----
+void destroy(int *p) {
+  std::cout << std::format("[{}] p={}", __PRETTY_FUNCTION__, p) << '\n';
+  delete p;
+}
+
+void foo() {
+  std::shared_ptr<int> x{new int{42}, destroy};
+}
+----
+
+这是因为 `std::shared_ptr` 和 `std::unique_ptr` 的实现机制不同，``std::unique_ptr`` 的实现类似于：
+
+[source,c++]
+----
+template <typename T, typename Deleter>
+class unique_ptr {
+  T _data;
+  Deleter _del;
+};
+----
+
+$$C++$$ 要求类的大小必须是编译期确定的，而在 deleter 可能是函数指针/函数对象（lambda 也是函数对象）的情况下，比较直观的办法就是增加一个模板参数。而 `std::shared_ptr` 为了在多个对象之间共享引用计数，必须将其放在堆内存上，因而 `std::shared_ptr` 的实现类似于：
+
+[source,c++]
+----
+template <typename T>
+class shared_ptr {
+  Impl<T, Deleter> *_impl;
+};
+
+template <typename T, typename Deleter>
+class Impl {
+  T _data;
+  std::size_t _ref_count;
+  Deleter _del;
+};
+----
+
+这意味着 ``std::shared_ptr<T>`` 占用的堆内存可能比 `std::unique_ptr<T>` 更少，但是由于间接层的存在，``std::shared_ptr<T>`` 的性能稍逊于 ``std::unique_ptr<T>``。
+
+=== weak_ptr
+
+如前文所述，``std::shared_ptr`` 是基于引用计数机制的，但是这种机制无法处理环形引用，如果 A 和 B 之间存在双向的引用，就会由于两个引用计数都无法减到 0 而产生内存泄漏（实际上，互相所有本身就是逻辑缺陷）。这时候不维护引用计数的 ``std::weak_ptr`` 就派上了用场。
+
+[source,c++]
+----
+class Vertex {
+  std::vector<std::shared_ptr<Vertex>> _downstream;
+  std::vector<std::weak_ptr<Vertex>> _upstream;
+};
+----
+
+=== 使用建议
+
+前文只是讲解了相关的 API，并没有说明各种智能指针应该用在什么场景下，下面是一般的准则：
+
+- 一般情况下，``std::unique_ptr`` 加上裸指针就足够了
+- 对于所有权不明晰的情况，可以使用 `std::shared_ptr` 加 `std::weak_ptr`
+
+=== 用 unique_ptr 实现双向链表
+
+[source,c++]
+----
+class LinkedList {
+  struct Node {
+    std::unique_ptr<Node> next;
+    Node *prev;
+    int data;
+  };
+
+  std::unique_ptr<Node> _dummy_head;
+
+ public:
+  LinkedList(): _dummy_head{new Node{}} {
+
+  }
+  void push_front(int v) {
+
+  }
+};
+----
+
