@@ -2,4 +2,5 @@
 title: "第 02 讲：词法分析"
 summary: "实现一个词法分析器"
 tags: ["compiler", "lexer", "lexical-analysis"]
+draft: true
 ---

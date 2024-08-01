@@ -90,7 +90,7 @@ int foo_internal(resource_t r) {
 
 $$C++$$ 中一切资源管理机制的基础是 RAII（Resource Acquisition Is Initialization，也可称为 RRID，Resource Release Is Destruction），一般的模式如下：
 
-[source,c++]
+[source,cpp]
 ----
 class RAIIGuard {
   resource_t *_res:
@@ -130,7 +130,7 @@ void foo() {
 
 ``std::unique_ptr`` 是最基本的智能指针，它可以用来表示独占所有权。用法：
 
-[source,c++]
+[source,cpp]
 ----
 void foo() {
   std::unique_ptr<int> x1{new int{42}};
@@ -149,7 +149,7 @@ void foo() {
 
 在析构时，``unique_ptr`` 默认的行为是调用其所有的对象的析构函数并释放相应的内存，不过我们也可以修改这个行为。
 
-[source,c++]
+[source,cpp]
 ----
 void destroy(int *p) {
   std::cout << std::format("[{}] p={}", __PRETTY_FUNCTION__, p) << '\n';
@@ -173,7 +173,7 @@ void foo() {
 
 `std::shared_ptr` 用于表达共享所有权：
 
-[source,c++]
+[source,cpp]
 ----
 void foo() {
   std::shared_ptr<int> x{new int{42}};
@@ -188,7 +188,7 @@ void foo() {
 
 与 `std::unique_ptr` 类似，``std::shared_ptr`` 也支持定制 ``Deleter``，但是不需要出现在模板参数中：
 
-[source,c++]
+[source,cpp]
 ----
 void destroy(int *p) {
   std::cout << std::format("[{}] p={}", __PRETTY_FUNCTION__, p) << '\n';
@@ -202,7 +202,7 @@ void foo() {
 
 这是因为 `std::shared_ptr` 和 `std::unique_ptr` 的实现机制不同，``std::unique_ptr`` 的实现类似于：
 
-[source,c++]
+[source,cpp]
 ----
 template <typename T, typename Deleter>
 class unique_ptr {
@@ -213,7 +213,7 @@ class unique_ptr {
 
 $$C++$$ 要求类的大小必须是编译期确定的，而在 deleter 可能是函数指针/函数对象（lambda 也是函数对象）的情况下，比较直观的办法就是增加一个模板参数。而 `std::shared_ptr` 为了在多个对象之间共享引用计数，必须将其放在堆内存上，因而 `std::shared_ptr` 的实现类似于：
 
-[source,c++]
+[source,cpp]
 ----
 template <typename T>
 class shared_ptr {
@@ -234,7 +234,7 @@ class Impl {
 
 如前文所述，``std::shared_ptr`` 是基于引用计数机制的，但是这种机制无法处理环形引用，如果 A 和 B 之间存在双向的引用，就会由于两个引用计数都无法减到 0 而产生内存泄漏（实际上，互相所有本身就是逻辑缺陷）。这时候不维护引用计数的 ``std::weak_ptr`` 就派上了用场。
 
-[source,c++]
+[source,cpp]
 ----
 class Vertex {
   std::vector<std::shared_ptr<Vertex>> _downstream;
@@ -251,7 +251,7 @@ class Vertex {
 
 === 用 unique_ptr 实现双向链表
 
-[source,c++]
+[source,cpp]
 ----
 class LinkedList {
   struct Node {

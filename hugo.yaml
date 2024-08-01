@@ -1,6 +1,5 @@
 # Basic configuration
 baseURL: "https://blog.rhanqtl.com/"
-languageCode: "zh-cn"
 title: rhanqtl
 theme: PaperMod
 
@@ -8,6 +7,10 @@ theme: PaperMod
 sectionPagesMenu: main
 
 # Content related configuration
+defaultContentLanguage: zh
+languages:
+  zh:
+    languageCode: zh-CN
 
 markup:
   tableOfContents:
@@ -31,6 +34,8 @@ security:
 params:
   ShowToc: true
   ShowBreadCrumbs: true
+  ShowReadingTime: true
+  ShowShareButtons: true
   social:
     - github: rhanqtl
       twitter: rhanqtl
