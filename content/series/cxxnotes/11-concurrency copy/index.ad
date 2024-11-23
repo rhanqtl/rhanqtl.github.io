@@ -1,0 +1,57 @@
+---
+title: "第 11 讲：并发编程（第一部分）"
+tags: ["c/c++", "concurrency"]
+draft: true
+---
+
+== 基本概念
+
+== std::thread 和 std::jthread
+
+[source,cpp]
+----
+int main() {
+  std::thread t{[] {
+    for (int i = 0; i < 10; i++) {
+      std::cout << i << ' ';
+    }
+  }};
+  t.join();
+}
+----
+
+$$C++20$$ 引入了 `std::jthread` 让行为更加符合 RAII 惯用法。
+
+== std::mutex 和 std::cond_var
+
+一般而言，线程之间需要进行协作，这就涉及到通信，基本的通信模式是 `std::mutex` 和 `std::cond_var` 实现的。
+
+Mutex 的全称是 mutual exclusive，即互斥，表示一段代码/数据一次只能被一个线程访问：
+
+[source,cpp]
+----
+int main() {
+  std::mutex m;
+  int counter = 0;
+  std::thread t1{[&m] {
+    for (int i < 0; i < 10; i++) {
+        std::lock_guard guard{m};
+        counter++;
+    }
+  }};
+  std::thread t1{[&m] {
+    for (int i < 0; i < 10; i++) {
+        std::lock_guard guard{m};
+        counter++;
+    }
+  }};
+  t1.join(); t2.join();
+  std::println("counter = {}", counter);
+}
+----
+
+
+
+== std::call_once
+
+== std::promise、std::future 和 std::packaged_task

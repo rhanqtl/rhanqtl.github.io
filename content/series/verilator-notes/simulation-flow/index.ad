@@ -1,0 +1,12 @@
+---
+title: "Verilator 仿真流程"
+tags: ["eda", "verilator", "simulator"]
+---
+
+[source,plantuml]
+----
+_eval_static;
+_eval_initial;
+_eval_settle;
+
+----

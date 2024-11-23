@@ -1,0 +1,242 @@
+---
+title: "对现有 AST 自动生成机制的研究"
+summary: "一般而言，在一个产品级别的编译器中，AST 是非常庞大的，这引入了几个问题：（1）\
+    除了数据成员外，往往还有很多相应的 getter/setter（所谓的“boiler template code”），\
+    人工实现繁琐且容易出错；（2）往往存在需要对大量节点类型进行批量处理的情况，这时如果\
+    有成熟的基础框架可以大大提升工作效率。因此，很多产品级的编译器使用了自动生成（部分）\
+    AST 定义的方式。本文 Clang 和 Verilator 为例进行研究。"
+---
+
+== Verilator
+
+=== 使用方式
+
+如下代码展示了 Verilator astgen 工具的基本使用方法：
+
+[source,cpp]
+----
+// From src/V3AstNodeExpr.h
+class AstNodeVarRef VL_NOT_FINAL : public AstNodeExpr {
+    // @astgen ptr := m_varp : Optional[AstVar]                    <1>
+    // @astgen ptr := m_varScopep : Optional[AstVarScope]          <1>
+    // @astgen ptr := m_classOrPackagep : Optional[AstNodeModule]  <1>
+    ASTGEN_MEMBERS_AstNodeVarRef;  // Gen pointers before other members for performance
+    /* ... */
+};
+----
+<1> “调用”astgen 指令
+
+其中 `ASTGEN_MEMBERS_AstNodeVarRef` 是一个由 astgen 工具生成的宏，内容如下：
+
+[source,cpp]
+----
+#define ASTGEN_MEMBERS_AstNodeVarRef \
+private: \
+    AstVar* m_varp = nullptr;    AstVarScope* m_varScopep = nullptr;    AstNodeModule* m_classOrPackagep = nullptr;public: \
+    AstNodeVarRef* unlinkFrBack(VNRelinker* linkerp = nullptr) { \
+        return static_cast<AstNodeVarRef*>(AstNode::unlinkFrBack(linkerp)); \
+    } \
+    AstNodeVarRef* unlinkFrBackWithNext(VNRelinker* linkerp = nullptr) { \
+        return static_cast<AstNodeVarRef*>(AstNode::unlinkFrBackWithNext(linkerp)); \
+    } \
+    AstNodeVarRef* cloneTree(bool cloneNext) { \
+        return static_cast<AstNodeVarRef*>(AstNode::cloneTree(cloneNext)); \
+    } \
+    AstNodeVarRef* cloneTreePure(bool cloneNext) { \
+        return static_cast<AstNodeVarRef*>(AstNode::cloneTreePure(cloneNext)); \
+    } \
+    AstNodeVarRef* clonep() const { return static_cast<AstNodeVarRef*>(AstNode::clonep()); } \
+    AstNodeVarRef* addNext(AstNodeVarRef* nodep) { return static_cast<AstNodeVarRef*>(AstNode::addNext(this, nodep)); } \
+    const char* brokenGen() const override; \
+    void cloneRelinkGen() override; \
+    void dumpTreeJsonOpGen(std::ostream& str, const string& indent) const override; \
+    void dumpJsonGen(std::ostream& str) const; \
+    static_assert(true, "")
+----
+
+.Verilator AST 构造
+****
+为了理解 astgen 的功能，我们需要了解 Verilator AST 结点的结构。下图展示了所有 AST
+节点的基类 AstNode 的基本构造：
+
+.Verilator ASTNode 结构示意图
+image::images/ast-rel.png[摘自 https://veripool.org/papers/Verilator_Internals0_202010.pdf]
+
+`AstNode` 是所有 AST 节点的基类，包含 6 个指针：
+
+- `backp` 指向父节点或前一个兄弟（sibling）节点
+- `nextp` 指向子节点或后一个兄弟节点
+- `op<N>p` 都指向一个子节点
+
+这样的结构让我们可以很容易地在树中进行遍历，相比于 Visitor 或 Iterator 性能更高。
+****
+
+我们来做一个拆解：
+
+[source,cpp]
+----
+// @astgen ptr             <1>
+//     := m_varp           <2>
+//     : Optional[AstVar]  <3>
+----
+<1> `ptr` 表示声明一个指针成员
+<2> 成员的名字为 `m_varp`
+<3> 指向的类型为 `AstVar`
+
+=== 完整的 `@astgen` 指令
+
+完整的 `@astgen` 指令如下几种形式：
+
+- `@astgen ( op1 | op2 | op3 | op4 ) := <identifier> : <type>`
+- `@astgen alias ( op1 | op2 | op3 | op4 ) := <identifier>`
+- `@astgen ptr := <identifier> : <type>`
+
+=== astgen 的实现
+
+. 读取所有相关的文件，基于类声明和 `@astgen` 指令构建一棵继承树，每个节点表示一个 AST 节点类型，
+  根节点表示 ``AstNode``（这意味着要求源文件中定义 AST 时必须有一定的顺序）
+. 基于构建出来的树，进行一些标记，例如：
+** 分配用于排序的 ID
+** 分配 type ID
+. 进行若干检查，包括
+** AST 节点的名字是否符合要求（interior 节点必须名为“AstNode*”，leaf 节点不能命名为“AstNode*”，只能为“Ast*”）
+** AST 节点的定义顺序
+. 读取一些额外的文件（不太相关，此处省略）
+. 生成 forward declaration，包括
+** ``V3Ast__gen_forward_class_decls.h`` 中包含 AST 节点的 forward declaration 和继承链
+** ``V3Ast__gen_visitor_decls.h`` 中包含 AST visitor 成员函数的声明
+** ``V3Ast__gen_visitor_defns.h`` 中包含 AST visitor 成员函数的实现
+** ``V3Ast__gen_type_enum.h``、``V3Ast__gen_type_tests.h`` 和 ``V3Ast__gen_type_info.h`` 中包含 AST 节点类型标记 enum 的定义、
+   一些工具函数和类型测试函数的实现，以及 AST 节点类型的元信息
+** ``V3Ast__gen_macros.h`` 和 ``V3Ast__gen_impl.h`` 中包含通过 ptr 定义的新增字段的声明、common 成员函数的声明和实现
+** ``V3Ast__gen_yystype.h`` 用于 yacc 的 YYSTYPE
+
+TIP: astgen 脚本还是非常值得一看的，其一是学习如何用正则表达式进行基本的文本处理，其二是学习其中的 Python 技巧
+
+基于 astgen，甚至可以直接定义一个 DSL 来实现对节点进行 transformation 的工作量，详见 src/V3Const.cpp。
+
+=== 整体流程
+
+`astgen` 脚本在 CMake 中有对应的 custom command：
+
+[source,cmake]
+----
+add_custom_command(
+    OUTPUT V3Ast__gen_forward_class_decls.h
+    DEPENDS ./V3Ast.h ${ASTGEN}
+    COMMAND ${PYTHON3} ARGS
+    ${ASTGEN} -I "${srcdir}" --astdef V3AstNodeDType.h --astdef V3AstNodeExpr.h --astdef V3AstNodeOther.h --classes
+)
+----
+
+也就是说，astgen 是在使用 `cmake` 命令配置项目时生效的。
+
+== Clang
+
+Clang 的 AST 是使用 LLVM 的 link::https://llvm.org/docs/TableGen/[TableGen] 定义的。为了完整性，此处简要介绍一下
+理解 Clang 的源码所必需的内容。
+
+=== TableGen 基础
+
+TableGen 中最基本的概念是 __record__，一个 record 具有唯一名字、值列表和基类列表，又可细分为两类：class 和 definition。
+
+* class，类似于传统程序设计语言中的类，在 td 中使用关键字 `class` 定义，例如：
+
+[source,td]
+----
+class MyClass<string name, list<int> xs>;
+----
+
+class 也允许继承：
+
+[source,td]
+----
+class Base<string name>;
+class Derived<string name, int ext> : Base<name>;
+----
+
+* definition，类似于传统程序设计语言中的对象，在 td 中使用关键字 `def` 定义，例如：
+
+[source,td]
+----
+def concrete_record : MyClass<"example", [1, 2, 3]>;
+----
+
+此外 TableGen 还有 multi-class，此处省略。
+
+
+=== Clang 中的 TableGen 定义
+
+此处以 Decl 节点为例，定义在 DeclNodes.td 中，节选部分：
+
+[source,td]
+----
+class DeclNode<DeclNode base, string diagSpelling = "", bit abstract = 0>
+    : ASTNode, AttrSubject {
+  DeclNode Base = base;
+  bit Abstract = abstract;
+  string DiagSpelling = diagSpelling;
+}
+
+class DeclContext {}
+
+def Decl : DeclNode<?, "", 1>;
+def TranslationUnit : DeclNode<Decl>, DeclContext;
+def Named : DeclNode<Decl, "named declarations", 1>;
+  def Namespace : DeclNode<Named, "namespaces">, DeclContext;
+  def Type : DeclNode<Named, "types", 1>;
+    def Tag : DeclNode<Type, "tag types", 1>, DeclContext;
+      def Enum : DeclNode<Tag, "enums">;
+      def Record : DeclNode<Tag, "structs, unions, classes">;
+        def CXXRecord : DeclNode<Record, "classes">;
+----
+
+生成的 DeclNodes.inc 的内容如下：
+
+[source,cpp]
+----
+#ifndef NAMED
+#  define NAMED(Type, Base) DECL(Type, Base)
+#endif
+
+#ifndef TYPE
+#  define TYPE(Type, Base) NAMED(Type, Base)
+#endif
+ABSTRACT_DECL(TYPE(Type, NamedDecl))
+#ifndef TAG
+#  define TAG(Type, Base) TYPE(Type, Base)
+#endif
+ABSTRACT_DECL(TAG(Tag, TypeDecl))
+#ifndef RECORD
+#  define RECORD(Type, Base) TAG(Type, Base)
+#endif
+RECORD(Record, TagDecl)
+#ifndef CXXRECORD
+#  define CXXRECORD(Type, Base) RECORD(Type, Base)
+#endif
+CXXRECORD(CXXRecord, RecordDecl)
+----
+
+`DECL` 这个宏不是在 .inc 文件中定义的，而是在 `ASTFwd.h` 中：
+
+[source,cpp]
+----
+class Decl;
+#define DECL(DERIVED, BASE) class DERIVED##Decl;
+#include "clang/AST/DeclNodes.inc"
+----
+
+运行 `clang -E /path/to/DeclNodes.inc /path/to/ASTFwd.h` 的结果如下：
+
+[source,cpp]
+----
+class Decl;
+class TypeDecl;
+class TagDecl;
+class RecordDecl;
+class CXXRecordDecl;
+----
+
+=== 整体流程
+
+跟 Verilator 类似，Clang 的 tablegen 也是在配置项目的时候工作的，不过 Clang 中做的事情更少，仅仅是生成了 forward declaration。

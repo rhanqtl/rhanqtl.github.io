@@ -1,9 +1,12 @@
 /public/
 .hugo_build.lock
 
-# clangd index files
-.cache
+.bundle
+.cache/
+build/
+cmake-build-*/
 
-# compilation output
 *.out
 *.exe
+
+

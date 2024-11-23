@@ -1,8 +1,0 @@
-[
-{
-  "directory": "/root/projects/rhanqtl.github.io/content/series/cxxnotes/05-meta-programming/code/libfmt/build",
-  "command": "/usr/sbin/c++  -I/root/projects/rhanqtl.github.io/content/series/cxxnotes/05-meta-programming/code/libfmt/include  -o CMakeFiles/libfmt_test.dir/libfmt_test.cpp.o -c /root/projects/rhanqtl.github.io/content/series/cxxnotes/05-meta-programming/code/libfmt/libfmt_test.cpp",
-  "file": "/root/projects/rhanqtl.github.io/content/series/cxxnotes/05-meta-programming/code/libfmt/libfmt_test.cpp",
-  "output": "CMakeFiles/libfmt_test.dir/libfmt_test.cpp.o"
-}
-]

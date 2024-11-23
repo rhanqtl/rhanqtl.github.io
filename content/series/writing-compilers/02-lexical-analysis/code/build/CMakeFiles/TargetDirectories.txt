@@ -1,3 +1,0 @@
-/root/projects/rhanqtl.github.io/content/series/writing-compilers/02-lexical-analysis/code/build/CMakeFiles/lexer.dir
-/root/projects/rhanqtl.github.io/content/series/writing-compilers/02-lexical-analysis/code/build/CMakeFiles/edit_cache.dir
-/root/projects/rhanqtl.github.io/content/series/writing-compilers/02-lexical-analysis/code/build/CMakeFiles/rebuild_cache.dir

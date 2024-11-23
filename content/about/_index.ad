@@ -1,8 +1,4 @@
 ---
-menus:
-  main:
-    name: "关于我"
-    weight: 1000
 ---
 
 == 个人简历

@@ -1,0 +1,32 @@
+---
+title: "第 09 讲：元编程（第三部分）"
+tags: ["c/c++", "template", "meta-programming"]
+draft: true
+---
+
+== 打印 Type Tree
+
+$$C++$$ 中声明语法和类型语法较为复杂，我们可以实现一些小工具简化理解。
+
+[source,c++]
+----
+std::unordered_map<std::string, std::pair<int, int>>
+----
+
+预期输出：
+
+----
+std::unordered_map
+|-- std::basic_string
+|   `-- char
+|-- std::pair
+|   |-- int
+|   `-- int
+|-- std::hash
+|   `-- std::basic_string
+|       `-- char
+`-- std::equal_to
+    `-- std::basic_string
+        `-- char
+----
+

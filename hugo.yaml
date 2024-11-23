@@ -4,13 +4,46 @@ title: rhanqtl
 theme: PaperMod
 
 # Navigation bar related configuration
-sectionPagesMenu: main
+#sectionPagesMenu: main
+menu:
+  main:
+    - identifier: series
+      name: "系列文章"
+      url: "/series"
+      weight: 10
+    - identifier: posts
+      name: "博文"
+      url: "/posts"
+      weight: 20
+    - identifier: portfolio
+      name: "作品集"
+      url: "/portfolio"
+      weight: 30
+    - identifier: about
+      name: "关于我"
+      url: "/about"
+      weight: 9999
+
 
 # Content related configuration
-defaultContentLanguage: zh
+defaultContentLanguage: zh-CN
+#defaultContentLanguageInSubdir: true
 languages:
-  zh:
+  zh-CN:
+    disabled: false
     languageCode: zh-CN
+    languageName: "简体中文"
+    weight: 10
+  zh-TW:
+    disabled: false
+    languageCode: zh-TW
+    languageName: "繁體中文"
+    weight: 11
+  en:
+    disabled: false
+    languageCode: en-US
+    languageName: "English"
+    weight: 20
 
 markup:
   tableOfContents:
@@ -21,6 +54,9 @@ markup:
       toclevels: '4'
       icons: font
       icon-set: fas
+
+pagination:
+  pagerSize: 9999
 
 security:
   exec:
@@ -34,11 +70,29 @@ security:
 params:
   ShowToc: true
   ShowBreadCrumbs: true
-  ShowReadingTime: true
+  # ShowReadingTime: true
   ShowShareButtons: true
-  social:
-    - github: rhanqtl
-      twitter: rhanqtl
+
+  profileMode:
+    enabled: true
+    title: "欢迎来到 rhanqtl 的个人网站！"
+    subtitle: "在这里你可以找到 C++ 和编译器相关的内容"
+    #imageUrl: "<image link>" # optional
+    #imageTitle: "<title of image as alt>" # optional
+    #imageWidth: 120 # custom size
+    #imageHeight: 120 # custom size
+    buttons:
+      #- name: Archive
+      #  url: "/archive"
+
+  socialIcons:
+  - name: "GitHub"
+    url: "https://github.com/rhanqtl"
+  - name: "StackOverflow"
+    url: "https://stackoverflow.com/users/11573272/rhanqtl"
+  - name: "Twitter"
+    url: "https://x.com/rhanqtl"
+
   fuseOpts:
     isCaseSensitive: false
     includeMatches: true

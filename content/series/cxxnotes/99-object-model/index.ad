@@ -1,0 +1,166 @@
+---
+title: "第 13 讲：对象模型"
+summary: "介绍 C++ 中数据对象的内存布局"
+draft: true
+---
+
+== 基本内存布局
+
+[source,c++]
+----
+struct Point3D {
+  int32_t x;
+  int32_t y;
+  int32_t z;
+};
+
+int main() {
+  std::cout << sizeof(Point3D) << ' ';
+  std::cout << offsetof(Point3D::x) << ' '
+            << offsetof(Point3D::y) << ' '
+            << offsetof(Point3D::z) << std::endl;
+}
+----
+
+在典型的 64-bit 机器上，输出为：
+
+----
+12 0 4 8
+----
+
+[source,c++]
+----
+struct PaddingInBetween {
+  int32_t x;
+  int64_t y;
+};
+----
+
+----
+16 0 8
+----
+
+[source,c++]
+----
+struct PaddingAtTheEnd {
+  int64_t y;
+  int32_t x;
+};
+----
+
+----
+16 0 8
+----
+
+== 柔性数组
+
+柔性数组实际上并不在 $$C++$$ 标准中，但是主流的 $$C++$$ 编译器都提供了支持。
+
+[source,c++]
+----
+struct Packet {
+  uint16_t src_port;
+  uint16_t dst_port;
+  uint32_t len : 4;
+  uint8_t  ext[0];
+
+  static std::unique_ptr<Packet> make(size_t len) {
+    assert(len % 4 == 0 && len <= 60);
+    void *mem = ::operator new(len);
+    auto pkt = new (mem) Packet{};
+    pkt.len = static_cast<uint32_t>(len / 4);
+    return std::unique_ptr<Packet>(pkt);
+  }
+};
+----
+
+=== 更进一步
+
+柔性数组实际上意味着我们可以一定程度上操控内存布局：
+
+假设有这样一个类：
+
+[source,c++]
+----
+template <typename T>
+class ArrayRef {
+ public:
+  using value_type = T;
+  using pointer_type = T*;
+  using size_type = std::size_t;
+
+ ArrayRef(pointer_type arr, size_type len): data_{arr}, n_{len} {}
+ // Other ctors and dtor are defaulted.
+
+ private:
+  pointer_type data_;
+  std::size_t n_;
+};
+----
+
+我们甚至可以这样：
+
+[source,c++]
+----
+class Dangerous {
+ public:
+  static std::unique_ptr<Dangerous> make(std::size_t n) {
+    void *mem = ::operator new(sizeof(Dangerous) + n * sizeof(uint32_t));
+    auto ans = new (mem) Dangerous{};
+    ans->xs_ = ArrayRef<uint32_t>{
+        reinterpret_cast<uint32_t*>(
+            reinterpret_cast<uintptr_t>(mem) + sizeof(Dangerous)),
+        n
+    };
+    return ans;
+  }
+
+ private:
+  ArrayRef<uint32_t> xs_;
+  int y_;
+};
+----
+
+// extended-mem.png
+
+== 在 C 语言中实现单继承
+
+[source,c++]
+----
+typedef struct {
+  double (*area)(void *self);
+} shape_vtbl_t;
+
+extern shape_vtbl_t rectangle_vtbl;
+extern shape_vtbl_t circle_vtbl;
+
+shape_vtbl_t rectangle_vtbl = {
+  .area = ...
+};
+
+
+typedef struct {
+  shape_vtbl_t *vtbl;
+} shape_t;
+
+typedef struct {
+  shape_t super;
+  double height;
+  double width;
+} rectangle_t;
+
+rectangle_t *make_rectangle(double h, double w);
+
+typedef struct {
+  shape_t super;
+  double radius;
+} circle_t;
+
+#define STATIC_CAST(typ, obj) ((typ)(obj))
+
+void example() {
+  rectangle_t *rect = make_rectangle(2, 3);
+  shape_t *a_shape = STATIC_CAST(shape_t, rect);
+  a_shape->vtbl->area(a_shape);
+}
+----

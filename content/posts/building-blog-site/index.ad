@@ -42,6 +42,7 @@ image::images/hljs-link.png[]
 ----
 <1> 在 highlight.js 提供的 HTML 的基础上增加 ``onload``，在加载 JavaScript 脚本之后对页面中所有代码块进行处理
 
+
 .代码高亮是如何实现的?
 ****
 此处不讨论编译原理相关的内容，仅记录一下 Hugo 是如何基于现有的 API 实现代码高亮的，以 AsciiDoc 为例。
@@ -79,6 +80,9 @@ int main() {
 <2> 每个 token 都被套上了 `span` 标签，其中 `class` 属性会在 CSS 中出现
 
 我们之前从 highlight.js 获取的 CSS 这时候就派上了用场。
+
+NOTE: 需要注意的是 `language-c++` 这种写法并不是合法的 class 值，可能会导致 highlight.js 失效，因此建议在给代码块指定语言时使用相应的纯字母版本，比如 `cpp`.
+
 ****
 
 === 扩展元素

@@ -1,0 +1,153 @@
+---
+title: "第 08 讲：元编程（第二部分）"
+summary: "所谓元编程（Meta-Programming），就是利用程序生成程序的编程技术，本文介绍 C++ 中进行元编程的手段"
+draft: true
+---
+
+== 引言
+
+== 宏
+
+Go 语言中有一个 `iota`，支持生成连续的整数值：
+
+[source,go]
+----
+const (
+    Flag1 = 1 << iota
+    Flag2
+    Flag3
+)
+----
+
+`Flag1`、`Flag2` 和 `Flag3` 分别有 1，2 和 4
+
+[source,c++]
+----
+#define VARIANT_VALUE 1 << (__COUNTER__ - 1 - __START__)
+#define DEFINE_VARIANT(id) id = VARIANT_VALUE
+enum Flags : uint16_t {
+    __START__ = __COUNTER__,
+    DEFINE_VARIANT(A),
+    DEFINE_VARIANT(B),
+    DEFINE_VARIANT(C),
+    DEFINE_VARIANT(D),
+    DEFINE_VARIANT(E),
+    DEFINE_VARIANT(F),
+    DEFINE_VARIANT(G),
+    DEFINE_VARIANT(H),
+    DEFINE_VARIANT(J),
+    DEFINE_VARIANT(K),
+    DEFINE_VARIANT(L),
+    DEFINE_VARIANT(M),
+    DEFINE_VARIANT(N),
+    DEFINE_VARIANT(P),
+    DEFINE_VARIANT(Q),
+    DEFINE_VARIANT(R),
+};
+#undef DEFINE_VARIANT
+#undef VARIANT_VALUE
+static_assert(__COUNTER__ - __START__ <= sizeof(Flags) * 8 + 1);
+#define FLAGS_VARIANT_VALUE 1 << (__COUNTER__ - __START__)
+#define DEFINE_FLAGS_VARIANT(id) id = FLAGS_VARIAN
+enum Flags {
+  __START__ = __COUNTER__,
+  A = FLAGS_VARIANT,
+
+};
+----
+
+=== dbg 宏
+
+[source,c++]
+----
+#include <iostream>
+#include <vector>
+
+#define dbg(expr) dbg_handler(__FILE__, __LINE__, __FUNCTION__, #expr, expr)
+
+template <typename T>
+T &&dbg_handler(const char *file, int line, const char *func, const char *text, T &&expr) {
+    std::cout << "[" << file << ':' << line << " (" << func << ")] " << text << " = " << expr << '\n';
+    return std::move(expr);
+}
+
+template <typename T>
+std::vector<T> &dbg_handler(const char *file, int line, const char *func, const char *text,
+                std::vector<T> &xs) {
+    std::cout << "[" << file << ':' << line << " (" << func << ")] " << text << " = ";
+    std::cout << '{';
+    bool first = true;
+    for (const T &x : xs) {
+        if (first)
+            first = false;
+        else
+            std::cout << ", ";
+        std::cout << x;
+    }
+    std::cout << '}' << '\n';
+    return xs;
+}
+
+int main() {
+    dbg(42);
+    std::vector<int> xs = {1, 2, 3};
+    dbg(xs);
+}
+----
+
+
+== 模板元编程
+
+元编程的基本思路是把表达式运算编程类型运算。
+
+[source,c++]
+----
+template <typename...>
+struct discard {
+    using type = void;
+};
+
+template <typename... Ts>
+using discard_t = typename discard<Ts>::type;
+
+template <bool Cond, typename Then, typename Else>
+struct If;
+
+template <typename Then, typename>
+struct If<true, Then, void> {
+    using type = typename Then::type;
+};
+
+template <typename, typename Else>
+struct If<false, void, Else> {
+    using type = typename Else::type;
+};
+
+template <bool Cond, typename Then, typename Else>
+using If_t = typename conditional<Cond, Then, Else>::type;
+----
+
+
+
+[source,c++]
+----
+struct Null;
+
+struct List;
+----
+
+
+=== 实现 `std::tuple`
+
+[source,c++]
+----
+class Unit {};
+
+template <typename Head, typename... Tail>
+class Tuple
+    : public std::conditional_t<sizeof...(Tail) == 0, Unit, Tuple<Tail...>> {
+ public:
+ private:
+  Head data_;
+};
+----

@@ -1,6 +1,7 @@
 ---
-title: "第 2 讲：面向对象编程"
+title: "第 02 讲：面向对象编程"
 summary: "讲解面向对象编程（Object-Oriented Programming）的知识"
+draft: true
 ---
 
 == 引言
@@ -9,52 +10,51 @@ summary: "讲解面向对象编程（Object-Oriented Programming）的知识"
 
 OOP 实际上有两种范式：
 
-* 一种是在 $$C++$$、Java 这类语言中的基于__类__的
-* 一种是在 Ruby 这类语言中基于__对象__的
+* 一种是在 $$C++$$、Java 这类语言中的基于__类__ 的
+* 一种是在 Ruby 这类语言中基于__对象__ 的
 
-NOTE: “基于对象”并不是说就没有类了，可是说可以基于单个对象进行更细粒度的控制。例如，在 Ruby 中，访问控制符 `private` 表示这个成员只有当前对象能够直接访问，其他对象（哪怕是同一个类的）必须通过公开接口访问。再例如，Ruby 中可以仅扩展单个对象的能力。
+NOTE: “基于对象”并不是说就没有类了，可是说可以基于单个对象进行更细粒度的控制。例如，在 Ruby 中，访问控制符 `private`
+表示这个成员只有当前对象能够直接访问，其他对象（哪怕是同一个类的）必须通过公开接口访问。再例如，Ruby 中可以仅扩展单个对象的能力。
 
-基本结构在《第一讲：快速入门》已经介绍过了，不再赘述。
+基本结构在link:{{< ref "/series/cxxnotes/01-intro" >}}[《第 01 讲：快速入门》]已经介绍过了，不再赘述。
 
 == 运算符重载
 
-假设现在我们实现了一个 `int128_t` 类，想要让它可以像基础类型那样进行 `+` `-` `*` `/` 运算：
+假设现在我们实现了一个 `int128_t` 类，想要让它可以像基础类型那样进行 ``+``、``-``、``*`` 和 `/` 运算：
 
-[source,c++]
+[source,cpp]
 ----
 class int128_t {
-public:
-    int128_t(uint64_t v): lsw_{v} {}
+ public:
+  int128_t(uint64_t v): lsw_{v} {}
 
-    int128_t operator+(const int128_t &rhs) const {
-        auto &lhs = *this;
-    }
+  int128_t operator+(const int128_t &rhs) const { /* ??? */ }
+  int128_t operator-(const int128_t &rhs) const { /* ??? */ }
+  int128_t operator*(const int128_t &rhs) const { /* ??? */ }
+  int128_t operator/(const int128_t &rhs) const { /* ??? */ }
 
-    int128_t &operator++() {
-
-    }
-    int128_t operator++(int) {
-
-    }
+  // int128_t &operator++() { /* ??? */ }
+  // int128_t operator++(int) { }
 
  private:
-   uint32_t words_[4]{};
+  uint32_t _words[4]{};
 };
 ----
 
-看上去运算符重载仅仅是语法糖，实际上它的作用要更大。例如在模板中，我们需要一个类的两个对象能够加起来，如果没有运算符重载，我们就必须：
+看上去运算符重载仅仅是语法糖，实际上它的作用要大得多。例如在模板中，我们需要一个类的两个对象能够加起来，
+如果没有运算符重载，我们就必须：
 
-[source,c++]
+[source,cpp]
 ----
 template <typename Add>
-void foo(const Add &lhs, const Add &rhs) {
-    auto res = lhs.add(rhs);
+Add foo(const Add &lhs, const Add &rhs) {
+    return lhs.add(rhs);
 }
 ----
 
 这样就有了一个问题：基础类型是没有 `.add` 这种操作的，想要让这个模板能够支持基础类型，我们必须创建一个新的类：
 
-[source,c++]
+[source,cpp]
 ----
 class Int32 {
  public:
@@ -74,28 +74,45 @@ NOTE: 有 Java 经验的人这时候应该会想到 Java 的“装箱类”，
 
 == 继承
 
-[source,c++]
+[source,cpp]
 ----
 class Shape {
-    virtual double area() = 0;
+ public:
+  virtual ~Shape() = default;
+
+ public:
+  virtual double area() = 0;
 };
 
-// Square should not be a derived class of Rectangle, which is a classic
-// LSP problem.
 class Rectangle final : public Shape {
-    double area() override {
+ public:
+  double area() override { return _h * _w; }
 
-    }
-
-    private:
-    double h_, w_;
+ private:
+  double _h, _w;
 };
 
 class Circle final : public Shape {
-    double area() override {}
-};
+ public:
+  double area() override { return PI * _r * _r; }
 
+ private:
+  double _r;
+};
 ----
+
+TIP: ``final`` 关键字表示该类是不可被继承的。
+
+=== protected 继承和 private 继承
+
+=== 多继承
+
+$$C++$$ 支持多继承，也就是一个类可以继承多个类，该技术很难用好，我们再次简单介绍相关语言特性。
+
+=== 继承的功能
+
+实际上继承有两个功能，其一是复用接口，其二是复用实现，软件工程中有一条很著名的原则“多用组合，少用继承”，
+说的就是在复用实现的时候尽量使用组合，这是因为
 
 == Pimpl 模式
 

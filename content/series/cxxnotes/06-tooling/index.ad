@@ -1,0 +1,24 @@
+---
+title: "第 06 讲：C++ 开发工具链"
+summary: "介绍 C++ 开发中常用工具链的基本使用，包括 CMake、GDB、c++filt、ldd、libtree、readelf 等"
+draft: true
+---
+
+== CMake
+
+首先可以看本站的另一篇博文
+
+=== 复用：宏和函数
+
+cmake_parse_arguments
+
+== GDB
+
+GDB 全称为 GNU Debugger，是调试 C/C++ 程序必不可少的工具。
+
+== 其他
+
+=== 查看动态库依赖：ldd 和 libtree
+
+=== 解析 Mangled Names：c++filt
+

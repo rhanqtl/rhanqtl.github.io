@@ -1,0 +1,13 @@
+[
+  {
+    "arguments": [
+      "/usr/sbin/g++",
+      "-c",
+      "-std=c++20",
+      "-fcoroutines",
+      "cron.cpp"
+    ],
+    "directory": "/root/projects/rhanqtl.github.io/content/series/cxxnotes/11-concurrency/code/coro",
+    "file": "/root/projects/rhanqtl.github.io/content/series/cxxnotes/11-concurrency/code/coro/cron.cpp"
+  }
+]

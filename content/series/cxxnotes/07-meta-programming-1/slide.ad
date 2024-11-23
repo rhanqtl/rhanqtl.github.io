@@ -1,0 +1,131 @@
+= Type Erasure
+
+By Robert Han @ Team5.RC3.X-EPIC
+
+== 动机
+
+如何实现一个能够维护任意可调用对象（callable objects，包括函数指针、lambda 和 function objects）的容器？
+
+难点在于，类型是无法事先枚举的。
+
+=== 使用 virtual 函数？
+
+行不通！
+
+[source,c++]
+----
+// The trait.
+template <typename Ret, typename... Args>
+class Fn {
+ public:
+  virtual Ret operator()(Args... args) = 0;
+  // Ignore the const-version.
+};
+
+template <typename LambdaT>
+class LambdaFn final : public Fn<UNKNOWN> {
+ public:
+  UNKNOWN operator()(UNKNOWN) override;
+};
+----
+
+这样有几个问题：
+
+* 依赖于 virtual 机制意味着必须使用指针和引用，容易出错
+
+== 实现一个 Any 容器
+
+为了介绍 type erasure 的基本模式，先来实现一个能够存放任意数据类型的容器。
+
+[source,c++]
+----
+#include <utility>
+#include <iostream>
+#include <typeinfo>
+
+class Any {
+  template <typename T>
+  friend T AnyCast(Any &);
+
+  struct Holder {
+    virtual bool matches(const std::type_info &ti) = 0;
+    virtual void print(std::ostream &out) = 0;
+  };
+  template <typename T>
+  struct HolderImpl : Holder {
+    T data;
+
+    // The type can be anything convertible to T 'template <typename U>',
+    // ignore that for now.
+    HolderImpl(T&& x): data{std::forward<T>(x)} {}
+
+    bool matches(const std::type_info &ti) override {
+        return typeid(T) == ti;
+    }
+    void print(std::ostream &out) override {
+        out << data;
+    }
+  };
+
+  public:
+  Any() = default;
+
+  template <typename T>
+  Any(T&& x): _holder{new HolderImpl<T>(std::forward<T>(x))} {}
+
+  template <typename T>
+  Any &operator=(T&& lhs) {
+    Any tmp{std::forward<T>(lhs)};
+    using namespace std;
+    swap(tmp);
+    return *this;
+  }
+
+  void swap(Any &other) noexcept {
+    auto *t = _holder;
+    _holder = other._holder;
+    other._holder = t;
+  }
+
+  void print(std::ostream &out) const {
+    _holder->print(out);
+  }
+
+  friend std::ostream &operator<<(std::ostream &out, const Any &x) {
+    x.print(out);
+    return out;
+  }
+
+ private:
+  Holder *_holder{nullptr};
+};
+----
+
+
+[source,c++]
+----
+template <typename T>
+T AnyCast(Any &x) {
+    if (!x._holder->matches(typeid(T)))
+      throw std::bad_cast();
+    auto h = static_cast<Any::HolderImpl<T>*>(x._holder);
+    return h->data;
+}
+----
+
+[source,c++]
+----
+int main() {
+    Any x;
+
+    x = 42;
+    std::cout << x << '\n';
+    std::cout << AnyCast<int>(x) << '\n';
+
+    x = 3.14;
+    std::cout << x << '\n';
+    std::cout << AnyCast<double>(x) << '\n';
+}
+----
+
+

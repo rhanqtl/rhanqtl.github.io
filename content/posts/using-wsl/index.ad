@@ -1,0 +1,95 @@
+---
+title: "Arch WSL 的安装及环境配置"
+date: 2024-11-23
+tags: ["wsl"]
+---
+
+== 引言
+
+很多工具只提供了 UNIX 家族的操作系统的支持，而且很多公司的开发环境是 Linux
+服务器。很久以前，想要在 Windows PC 上用 GNU/Linux 只有两个选项：虚拟机和双系统。
+两者在跟 Windows 交互时需要比较麻烦的环境配置。YYYY 年开始，我们有了新的选项：
+微软开发了 WSL，可以在 Windows 上直接启动 Linux，这对开发带来了极大的便利。
+
+本文以 Arch Linux 为例，介绍 WSL 的安装和配置。
+
+== WSL 是什么？
+
+WSL2 采用了类似于虚拟机的方案。
+
+== 安装 Arch WSL
+
+参见link:https://wsldl-pg.github.io/ArchW-docs/[文档]
+
+== 基本配置
+
+我们使用 WSL2，因此需要进行一些额外的配置，才能丝滑地使用网络。
+
+WSL2 的配置分为两个部分：Windows 系统上的 `~/.wslconfig` 和 WSL 中的 `/etc/wsl.conf`，
+我的配置如下：
+
+首先是 Windows 中的 `~/.wslconfig`，内容如下：
+
+[source,toml]
+----
+[wsl2]
+networkingMode=mirrored   <1>
+dnsTunneling=true
+firewall=false
+autoProxy=true            <2>
+guiApplications=true
+memory=56GB
+
+[experimental]
+autoMemoryReclaim=gradual <3>
+sparseVhd=true            <4>
+----
+
+<1> 启用“mirrored”网络模式，将 Windows 上的网络接口“镜像”到 Linux 中
+<2> 让 WSL 使用 Windows 的 HTTP 代理信息
+<3> TODO
+<4> TODO
+
+然后是 WSL 中的 `/etc/wsl.conf`，内容如下：
+
+[source,toml]
+----
+[automount]
+enabled = true
+options = "metadata"
+mountFsTab = true
+
+[boot]
+systemd = true <1>
+
+[user]
+default = ${YOUR_USER_NAME} <2>
+----
+
+<1> 启用 systemd
+<2> 设置默认用户
+
+== 代理配置
+
+很多 App 都会吃这几个环境变量：``http_proxy``、``https_proxy`` 和 ``all_proxy``。
+如果你在 Windows 上配置了代理软件，那么在 WSL 中，只需要：
+
+[source,bash]
+----
+export http_proxy="http://127.0.0.1:${PROXY_LISTEN_PORT}"
+----
+
+就可以了
+
+TIP: 互联网中部分资料会从 `/etc/resolv.conf` 中获取 IP 地址，这种方式已经过时了
+
+== WSL 网络架构
+
+== 其他注意事项
+
+需要注意的是，WSL2 跟 Windows 的文件系统交互是使用网络的，这可能会有一定的性能损失。
+
+[bibliography]
+== 参考文献
+
+* https://learn.microsoft.com/en-us/windows/wsl/networking

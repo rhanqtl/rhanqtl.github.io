@@ -1,0 +1,9 @@
+@startuml coroutine_flow
+
+start
+:coroutine;
+:default-construct an object of 'promise_type', named 'prom';
+:call 'promise_type::get_return_object' to get the user-handle;
+end
+
+@enduml

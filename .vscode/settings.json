@@ -2,11 +2,4 @@
     "cSpell.words": [
         "CXXNOTES"
     ],
-    "vim.handleKeys": {
-        "<C-s>": true,
-        "<C-z>": true,
-        "<C-c>": true,
-        "<C-v>": true,
-        "<C-x>": true,
-    }
 }

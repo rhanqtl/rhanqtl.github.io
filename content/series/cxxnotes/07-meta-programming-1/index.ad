@@ -1,0 +1,16 @@
+---
+title: "第 07 讲：元编程（第一部分）"
+# date: 2024-08-01
+summary: "本文介绍 C++ 模板编程中一种称为“类型擦除”（type erasure）的技术，读者可以了解 std::function 和 std::any 等容器的基本实现原理"
+draft: true
+---
+
+== 动机
+
+思考这样一个需求：实现一个能够存储任意可调用对象（callable objects，包括 lambda、函数指针和 function object）的容器（其实就是 ``std::function``）。
+
+这里的难点在于，可调用对象的类型是事先不可知的，所以必须有一种能够泛化的机制。你可能会想到使用 OOP 技术：
+
+[source,c++]
+----
+----
