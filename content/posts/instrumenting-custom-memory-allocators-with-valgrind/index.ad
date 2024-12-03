@@ -1,0 +1,31 @@
+---
+title: "为定制内存分配器适配 Valgrind"
+date: 2024-12-03
+tags: ["valgrind"]
+---
+
+== 引言
+
+Valgrind 是一款强大的二进制分析引擎，一个很常见的用途是检测内存泄漏。
+
+TODO: 基本用法
+
+== 定制内存分配器
+
+假设我们有一个简单的内存分配器
+
+[source,cpp]
+----
+class Allocator {
+ public:
+  void *allocate(std::size_t nbytes) {
+
+  }
+  void deallocate(void *p) {
+
+  }
+
+ private:
+  uint8_t _memory[4096];
+}
+----

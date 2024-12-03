@@ -69,10 +69,17 @@ default = ${YOUR_USER_NAME} <2>
 <1> 启用 systemd
 <2> 设置默认用户
 
+== 图形界面
+
+首先按照link:https://learn.microsoft.com/en-us/windows/wsl/tutorials/gui-apps[官网]
+的步骤升级 Windows 和 WSL，然后安装一个 GUI 工具（比如，xcalc）试试看，如果能正常显示，
+那么就成功了，否则可以按照link:https://github.com/microsoft/wslg/issues/1032#issuecomment-1977067541[这里]
+的方式尝试修复。
+
 == 代理配置
 
-很多 App 都会吃这几个环境变量：``http_proxy``、``https_proxy`` 和 ``all_proxy``。
-如果你在 Windows 上配置了代理软件，那么在 WSL 中，只需要：
+很多 App 都会吃这几个环境变量：``http_proxy``、``https_proxy`` 和 ``all_proxy``
+（区分大小写）。如果你在 Windows 上配置了代理软件，那么在 WSL 中，只需要：
 
 [source,bash]
 ----
