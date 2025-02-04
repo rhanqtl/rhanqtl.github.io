@@ -26,12 +26,12 @@ menu:
 
 
 # Content related configuration
-defaultContentLanguage: zh-CN
+defaultContentLanguage: zh
 #defaultContentLanguageInSubdir: true
 languages:
-  zh-CN:
+  zh:
     disabled: false
-    languageCode: zh-CN
+    languageCode: zh
     languageName: "简体中文"
     weight: 10
   # zh-TW:
@@ -120,4 +120,4 @@ outputs:
 
 services:
   disqus:
-    shortname: rhanqtl
+    shortname: blog-6cqjzlgkbx
