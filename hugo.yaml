@@ -112,6 +112,8 @@ params:
 
   comments: true
 
+  dateFormat: "2006-1-2"
+
 outputs:
   home:
     - HTML
