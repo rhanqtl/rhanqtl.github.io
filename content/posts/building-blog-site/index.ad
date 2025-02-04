@@ -9,6 +9,8 @@ summary: "使用 Hugo, PaperMod 和 AsciiDoc, 基于 GitHub Pages 创建个人�
 
 == 初始化 PaperMod 主题
 
+参考link:https://andrewu.page/2022/02/how-to-add-an-rss-feed-to-your-hugo-papermod-theme/[这个链接]的内容添加 RSS 订阅入口
+
 == 改进 AsciiDoc 支持
 
 目前，Hugo 对 AsciiDoc 的支持还不是很完善，我们需要进行一些微调。

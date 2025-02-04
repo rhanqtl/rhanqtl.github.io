@@ -68,10 +68,13 @@ security:
       - ^asciidoctor$
 
 params:
+  #label:
+  #  icon: "logo.png"
   ShowToc: true
   ShowBreadCrumbs: true
   # ShowReadingTime: true
   ShowShareButtons: true
+  ShowFullTextinRSS: true
 
   profileMode:
     enabled: true
@@ -92,6 +95,8 @@ params:
     url: "https://stackoverflow.com/users/11573272/rhanqtl"
   - name: "Twitter"
     url: "https://x.com/rhanqtl"
+  - name: "RSS"
+    url: "index.xml"
 
   fuseOpts:
     isCaseSensitive: false
