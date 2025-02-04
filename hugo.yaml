@@ -34,16 +34,16 @@ languages:
     languageCode: zh-CN
     languageName: "简体中文"
     weight: 10
-  zh-TW:
-    disabled: false
-    languageCode: zh-TW
-    languageName: "繁體中文"
-    weight: 11
-  en:
-    disabled: false
-    languageCode: en-US
-    languageName: "English"
-    weight: 20
+  # zh-TW:
+  #   disabled: false
+  #   languageCode: zh-TW
+  #   languageName: "繁體中文"
+  #   weight: 11
+  # en:
+  #   disabled: false
+  #   languageCode: en-US
+  #   languageName: "English"
+  #   weight: 20
 
 markup:
   tableOfContents:
@@ -68,8 +68,8 @@ security:
       - ^asciidoctor$
 
 params:
-  #label:
-  #  icon: "logo.png"
+  # label:
+  #   icon: "logo.png"
   ShowToc: true
   ShowBreadCrumbs: true
   # ShowReadingTime: true
@@ -95,6 +95,8 @@ params:
     url: "https://stackoverflow.com/users/11573272/rhanqtl"
   - name: "Twitter"
     url: "https://x.com/rhanqtl"
+  - name: "Reddit"
+    url: "https://www.reddit.com/user/rhanqtl/"
   - name: "RSS"
     url: "index.xml"
 
@@ -108,8 +110,14 @@ params:
     minMatchCharLength: 0
     keys: ["title", "permalink", "summary", "content", "tags", "categories"]
 
+  comments: true
+
 outputs:
   home:
     - HTML
     - RSS
     - JSON
+
+services:
+  disqus:
+    shortname: rhanqtl
