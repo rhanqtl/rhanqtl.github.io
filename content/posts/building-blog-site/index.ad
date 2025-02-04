@@ -7,9 +7,37 @@ summary: "使用 Hugo, PaperMod 和 AsciiDoc, 基于 GitHub Pages 创建个人�
 
 == 初始化 Hugo
 
-== 初始化 PaperMod 主题
+== 配置 PaperMod 主题
+
+=== 添加 RSS 订阅
 
 参考link:https://andrewu.page/2022/02/how-to-add-an-rss-feed-to-your-hugo-papermod-theme/[这个链接]的内容添加 RSS 订阅入口
+
+=== 支持 Disqus 评论
+
+Hugo 内置了 Disqus 的支持，配置起来很简单。首先在 link:https://disqus.com/[Disqus] 注册一个账号，按照link:https://help.disqus.com/en/articles/1717111-what-s-a-shortname[这篇文章]中的指引注册一个“site”，记住它的“shortname”（网站类型可以选 Jekyll）
+
+然后，在 Hugo 配置文件中增加如下内容：
+
+[source,yaml]
+----
+params:
+  comments: true
+
+services:
+  disqus:
+    shortname: your-disqus-shortname
+----
+
+最后，在 themes/PaperMod 的 layouts/partials/comments.html 中增加一行：
+
+[source,text]
+----
+{{- /* Comments area start */ -}}
+{{- /* to add comments read => https://gohugo.io/content-management/comments/ */ -}}
+{{ template "_internal/disqus.html" . }}  <!-- 这一行是新增的 -->
+{{- /* Comments area end */ -}}
+----
 
 == 改进 AsciiDoc 支持
 
