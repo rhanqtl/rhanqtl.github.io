@@ -66,7 +66,7 @@ image::images/ast-rel.png[摘自 https://veripool.org/papers/Verilator_Internals
 
 - `backp` 指向父节点或前一个兄弟（sibling）节点
 - `nextp` 指向子节点或后一个兄弟节点
-- `op<N>p` 都指向一个子节点
+- `op<N>p` 指向第 N 个子节点（从 1 开始计数）
 
 这样的结构让我们可以很容易地在树中进行遍历，相比于 Visitor 或 Iterator 性能更高。
 ****
@@ -239,4 +239,16 @@ class CXXRecordDecl;
 
 === 整体流程
 
-跟 Verilator 类似，Clang 的 tablegen 也是在配置项目的时候工作的，不过 Clang 中做的事情更少，仅仅是生成了 forward declaration。
+跟 Verilator 类似，Clang 的 tablegen 也是在配置项目的时候工作的，不过 Clang
+中做的事情更少，仅仅是生成了前向声明。
+
+== 总结
+
+本文介绍了 SystemVerilog 仿真器 Verilator 和 C++ 编译器 Clang 是如何生成 AST 的。
+两者均使用了外部 DSL（external DSL），前者使用 Python 进行翻译，可以生成完整的 AST
+节点类型定义和一些辅助信息；后者借助了 LLVM 的 TableGen 工具，能够生成前向声明。
+
+生成 AST 节点类型定义本质上是一个元编程任务。C++ 中对于生成类型定义这方面的支持比较孱弱，
+因此一般需要借助外部力量。读者也可以进一步研究 Python、Rust 和 Zig 这些语言中如何实现类似的任务。
+
+除了生成 AST 之外，很多工具也基于 DSL 生成诊断信息。例如，Slang 就使用了一种 DSL 来生成诊断信息。

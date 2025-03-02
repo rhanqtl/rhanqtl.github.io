@@ -1,0 +1,62 @@
+---
+title: "配置 DeepSeek API"
+date: 2025-03-02
+tags: ["ai"]
+summary: "本文介绍如何配置 DeepSeek API"
+---
+
+== 前言
+
+众所周知，DeepSeek 的聊天经常会“服务器繁忙”，为了获得更好的使用体验，可以付费使用 DeepSeek API.
+
+== 生成 API Key
+
+首先，你需要在 DeepSeek 开放平台创建一个 link:https://platform.deepseek.com/api_keys[API key] 并充值。
+不要担心，DeepSeek 的 API 还是很便宜的，一百万 token 在完全不命中缓存的情况下才 4 人民币，根据我的使用情况，
+这足够发起 270 次请求，折算下来一次请求只有 0.015 元。
+
+IMPORTANT: 一定要记住 API key，否则需要重新创建。
+
+== 使用 Open WebUI 作为前端
+
+DeepSeek 本身并不提供本地部署的图形界面，用命令行显然不是什么好选择，好在我们可以用 Open WebUI 作为前端。
+
+link:https://github.com/open-webui/open-webui[Open WebUI] 官方是这样定位的：
+
+> Open WebUI 是一个可扩展、功能丰富且用户友好的自托管 AI 平台，旨在完全离线运行。它支持各种 LLM 运行器，如 Ollama 和 OpenAI 兼容的 API，并内置了 RAG 推理引擎，使其成为强大的 AI 部署解决方案。
+
+本文选择使用 Docker 启动
+
+[source,shell]
+----
+docker run -d -p 3000:8080                                \
+    -e WEBUI_AUTH=False                                   \  <1>
+    -e OPENAI_API_BASE_URL=https://api.deepseek.com/v1    \  <2>
+    -e OPENAI_API_KEY="$YOUR_SECRET_KEY"                  \  <3>
+    -e HF_ENDPOINT=https://hf-mirror.com                  \  <4>
+    -v /var/run/deepseek:/app/backend/data                \  <5>
+    --name deepseek-ui                                    \
+    --restart always                                      \
+    ghcr.io/open-webui/open-webui:main
+----
+
+<1> 只需要自己用（也就是所谓的“单用户模式”），不需要创建账号密码
+<2> DeepSeek 采用了兼容 OpenAI 的 API 设计
+<3> 填入创建的 API key
+<4> 国内访问 HuggingFace 有些问题，使用镜像代替
+<5> 将本地的 `/var/run/deepseek` 这个目录挂在到容器中，并映射为 `/app/backend/data`，记得先创建这个目录
+
+[TIP]
+====
+如果拉取镜像的速度很慢，可以考虑配置 `HTTP_PROXY` 环境变量或是在 `/etc/docker/daemon.json` 中加入：
+
+[source,json]
+----
+"proxies": {
+  "http-proxy": "$YOUR_PROXY",
+  "https-proxy": "$YOUR_PROXY",
+}
+----
+====
+
+启动之后，需要等待一段时间，然后在浏览器中访问 `localhost:3000`，就可以开始对话了。
