@@ -79,7 +79,7 @@ params:
   profileMode:
     enabled: true
     title: "欢迎来到 rhanqtl 的个人网站！"
-    subtitle: "在这里你可以找到 C++ 和编译器相关的内容"
+    subtitle: "在这里你可以找到 C++、编译器和 EDA 相关的内容"
     #imageUrl: "<image link>" # optional
     #imageTitle: "<title of image as alt>" # optional
     #imageWidth: 120 # custom size

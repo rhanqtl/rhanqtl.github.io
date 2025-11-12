@@ -1,6 +1,7 @@
 ---
 title: "第 12 讲：并发编程（第二部分）"
 summary: "本讲介绍 C++20 引入的语言特性——协程（coroutine）"
+draft: true
 ---
 
 == 引言

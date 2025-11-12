@@ -1,0 +1,142 @@
+---
+title: "fuzzy 的用户接口"
+date: 2025-08-23
+draft: true
+---
+
+fuzzy 的用户接口跟 SystemVerilog 的约束求解器非常类似。
+
+我们首先k来看看 N 皇后在 fuzzy 中的实现：
+
+[source,cpp]
+----
+template <std::size_t N>
+struct NQueens {
+  FUZZY_RAND std::array<std::size_t, N> queens;
+
+  FUZZY_CONSTRAINT(solution) {
+    for (std::size_t i = 0; i < N; ++i) {
+      queens[i].inside({0, N - 1});                  // 每个皇后在棋盘范围
+      for (std::size_t j = 0; j < N; ++j) {
+        if (i != j) {
+          queens[i] != queens[j];                    // 不在同一列
+          abs(queens[i] - queens[j]) != abs(i - j);  // 不在同一对角线
+        }
+      }
+    }
+  }
+};
+----
+
+还可以支持 unordered_map 之类的容器：
+
+[source,cpp]
+----
+----
+
+枚举类型：
+
+[source,cpp]
+----
+enum class Color { kRed, kGreen, kBlue, kYellow, kBlack, kWhite };
+class Car {
+  FUZZY_RAND Color color;
+
+  FUZZY_CONSTRAINT(c) {
+    color.inside(Color::kRed, Color::kGreen, Color::kBlue);
+  }
+};
+----
+
+== 取值分布
+
+[source,cpp]
+----
+class Vars {
+  FUZZY_RAND int x;
+  FUZZY_RAND int y;
+  FUZZY_RAND int z;
+
+  FUZZY_CONSTRAINT(c) {
+    x.dist_count({0, 40}, {{1,3}, 60});   // 产生 40 个 0、60 个 1、60 个 2、60 个 3，共 220 个样本
+    // 0 的权重: 40/220 = 18.18%
+    // 1 的权重: 60/220 = 27.27%
+    // 2 的权重: 60/220 = 27.27%
+    // 3 的权重: 60/220 = 27.27%
+
+    y.dist_percent({0, 40}, {{1,100}, 60});
+    // 0 的权重：40%
+    // 1-100 的权重：60%
+
+    z.dist_uniform({0,1}, {3,100});  // 0-1,3-100 均匀分布
+  }
+};
+----
+
+== 软性约束
+
+[source,cpp]
+----
+class Equation {
+  FUZZY_RAND int x;
+  FUZZY_RAND int y;
+  FUZZY_RAND int z;
+
+  FUZZY_CONSTRAINT(c) {
+    x + y == z;
+    x > 0;
+    y > 0;
+    FUZZY_SOFT z < 0;
+  }
+};
+----
+
+== 成员函数
+
+最基本的接口是 ``fuzzy::randomize<T>``，它会随机化所有成员变量并满足所有约束，其返回值为 ``std::expected<T, fuzzy::RandomizeError>``：
+
+[source,cpp]
+----
+#include <format>
+#include <iostream>
+
+#include <fuzzy/fuzzy.h>
+
+class Equation { /* ... */ };
+
+int main() {
+  auto res = fuzzy::randomize<Equation>();
+  if (!res) {
+    std::cerr << std::format("Randomization failed: {}", res.error().what()) << '\n';
+    return 1;
+  }
+  const auto &eq = *res;
+  std::cout << std::format("x = {}, y = {}, z = {}", eq.x, eq.y, eq->z) << "\n";
+  return 0;
+}
+----
+
+``fuzzy::randomize<T>`` 也可以接受一个约束 lambda：
+
+// TODO
+
+[source,cpp]
+----
+class Equation {
+  FUZZY_RAND int x;
+  FUZZY_RAND int y;
+};
+
+int main() {
+  int z = /* ... */;
+  auto res = fuzzy::randomize<Equation>(/* with= */ {
+    x + y == z;
+  });
+};
+----
+
+可以用 enable/disable 来启用/禁用某个约束或变量
+
+fuzzy 还提供了 `validate<T>` 来验证一个对象是否满足约束
+
+为了得到一个随机序列，多次调用 `fuzzy::randomize<T>` 即可

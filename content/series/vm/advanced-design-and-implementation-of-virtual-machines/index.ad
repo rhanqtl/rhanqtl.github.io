@@ -1,0 +1,28 @@
+---
+title: "Advanced Design and Implementation of Virtual Machines 读书笔记"
+summary: "如题"
+tags: ["compiler", "virtual-machine", "interpreter", "jit"]
+draft: true
+---
+
+虚拟机的一种分类方式：
+
+. Full ISA virtual machine，可用于模拟真实计算机系统级（emulation）和虚拟化，例如 VirtualBox 和 QEMU
+. ABI virtual machine 可用于 API 模拟（emulation）
+. Virtual ISA virtual machine 可用于模拟虚拟 ISA，例如 JVM，跟 1 的区别是通常提供的是高层和受限的 ISA 语义，补充需要能够完全模拟一个真实的计算机系统
+. Language virtual machine 提供用于执行 guest language 编写的程序的运行时引擎，例如 Lisp 解释器
+
+前两种也称为 emulator，一般是用于非宿主系统的功能（例如在 x86 机器上运行 RISC-V 程序）
+
+边界并没有那么清晰
+
+为什么需要虚拟机？
+
+. 安全性
+.. 内存安全
+.. 操作安全 For example, a variable of pointer type does not allow
+arbitrary arithmetic operations on it.
+.. 控制安全 ensures that the low of code execution never reach any point that
+either gets stuck or goes wild
+. 生产效率
+. 可移植性

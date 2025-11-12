@@ -1,0 +1,77 @@
+---
+title: "引言"
+date: 2025-04-10
+draft: true
+---
+
+:fn-systemc: footnote:[属于 SystemC 生态的库。]
+
+本专栏介绍笔者基于 Clang 实现的 $$C++$$ 约束定义及求解 DSL，其灵感来源于笔者在工作中参与实现 SystemVerilog 约束求解器的经历。
+
+SystemVerilog 的约束求解器非常的强大，可以实现声明式编程
+
+// TODO: 是否图灵完备?
+
+例如：
+
+[source,systemverilog]
+----
+class Equation;
+  rand int x;
+  rand int y;
+  rand int z;
+
+  constraint c {
+    x + y == z;
+  }
+endclass
+----
+
+我们甚至可以用它来求解 N 皇后问题：
+
+[source,systemverilog]
+----
+class NQueens #(parameter int N = 8);
+  rand int queens[N];
+
+  constraint solution {
+    foreach (queens[i]) {
+      queens[i] inside {[0:N-1]};                          // 每个皇后在棋盘范围
+      foreach (queens[j]) {
+        if (i != j) {
+          queens[i] != queens[j];                      // 不在同一列
+          $abs(queens[i] - queens[j]) != $abs(i - j);  // 不在同一对角线
+        }
+      }
+    }
+  }
+
+  task print();
+    string board[N][N];
+    foreach (board[i, j]) board[i][j] = ".";
+    for (int i = 0; i < N; i++) board[i][queens[i]] = "Q";
+    for (int i = 0; i < N; i++) begin
+      for (int j = 0; j < N; j++) $write(board[i][j]);
+      $write("\n");
+    end
+endclass
+
+program nqueens_demo;
+  NQueens#(8) nq = new;
+  if (nq.randomize())
+    nq.print();
+  else
+    $display("Failed to solve N-Queens");
+endprogram
+----
+
+C++ 中也有类似的库，例如：
+
+* link:https://www.gecode.org/[Gecode]
+* link:https://github.com/pothitos/naxos[Naxos Solver]
+* link:https://systemc.org/overview/systemc-verification/[SystemC Verification Library]{fn-systemc}
+* link:https://github.com/accellera-official/crave[CRAVE]{fn-systemc}
+
+但它们的使用并不如 SystemVerilog 那么方便或方便————最基本的，他们都需要手动创建随机变量，像 scv 还需要手动实现反射接口才能将随机变量映射回对象（一种比较有前景的实现方式是使用 $$C++26$$ 的静态反射）。
+
+笔者从众多的代码生成器————moc、protobuf 和 grpc————得到了灵感，决定基于 Clang 实现约束求解器的前端。

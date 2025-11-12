@@ -56,6 +56,29 @@ enum Flags {
 };
 ----
 
+优先级
+
+[source,cpp]
+----
+#define OUTER(x) INNER_##x
+#define INNER_123 456
+#define A B
+OUTER(xyz) // 展开为 INNER_xyz（而非 456），因 ## 阻断展开
+----
+
+[source,cpp]
+----
+#define OUTER(x) CONCAT(INNER_, x)
+#define INNER_123 456
+#define xyz 123
+#define CONCAT(x, y) CONCAT_INTERNAL(x,y)
+#define CONCAT_INTERNAL(x, y) x##y
+OUTER(xyz) // 展开为 INNER_123（而非 456），因 ## 阻断展开
+
+----
+
+https://sourceware.org/gdb/current/onlinedocs/gdb.html/Macros.html
+
 === dbg 宏
 
 [source,c++]
@@ -95,6 +118,7 @@ int main() {
 }
 ----
 
+X macro 行号问题
 
 == 模板元编程
 

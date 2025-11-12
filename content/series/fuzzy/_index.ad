@@ -1,0 +1,8 @@
+---
+title: "fuzzy：基于 C++ 的约束编程 DSL"
+date: 2025-04-10
+summary: "本系列介绍如何在 C++ 中实现一套类似 SystemVerilog 的变量约束 DSL，支持约束求解"
+draft: true
+---
+
+

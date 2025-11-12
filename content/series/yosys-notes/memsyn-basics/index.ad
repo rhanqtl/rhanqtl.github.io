@@ -1,0 +1,162 @@
+---
+title: "RAM 综合之基础知识"
+tags: ["eda", "yosys", "logic-synthesis", "ram", "memory", "fpga"]
+draft: true
+---
+
+== 内存类型
+
+|===
+| 全名                        | 简称    | 同步读？ | 同步写？ | 共用地址线？ | 备注
+
+| Single-Port RAM             | SP-RAM  | ✓        | ✓        | ✓            |
+| Synchronous Dual-Port RAM   | SDP-RAM | ✓        | ✓        | ✗            |
+| True Dual-Port RAM          | TDP-RAM | ✗        | ✗        | ✗            | 相当于两个 SPRAM
+|===
+
+=== Single-Port RAM
+
+[source,systemverilog]
+----
+module SPRAM #(
+    parameter int ADDR_WIDTH,
+    parameter int DATA_WIDTH
+) (
+    input                       clk,
+    input                       wen,
+    input      [ADDR_WIDTH-1:0] addr,
+    input      [DATA_WIDTH-1:0] din,
+    output reg [DATA_WIDTH-1:0] dout
+);
+    localparam int DEPTH = 1 << ADDR_WIDTH;
+
+    reg [DATA_WIDTH-1:0] mem [DEPTH-1:0];
+
+    always @(posedge clk) begin
+        if (wen)
+            dout <= mem[addr];
+        mem[addr] <= din;
+    end
+endmodule
+----
+
+=== Simple Dual-Port RAM
+
+[source,systemverilog]
+----
+module SDPRAM #(
+    parameter int ADDR_WIDTH,
+    parameter int DATA_WIDTH
+) (
+    input                       clk_a,
+    input                       wen_a,
+    input      [ADDR_WIDTH-1:0] addr_a,
+    input      [DATA_WIDTH-1:0] din_a,
+    input                       clk_b,
+    input      [ADDR_WIDTH-1:0] addr_b,
+    output reg [DATA_WIDTH-1:0] dout_b
+);
+    localparam int DEPTH = 1 << ADDR_WIDTH;
+
+    reg [DATA_WIDTH-1:0] mem [DEPTH-1:0];
+
+    always @(posedge clk_a) begin
+        if (wen_a)
+            mem[addr_a] <= din_a;
+    end
+
+    always @(posedge clk_b) begin
+        dout_b <= mem[addr_b];
+    end
+)
+----
+
+=== True Dual-Port RAM
+
+[source,systemverilog]
+----
+module TDPRAM #(
+    parameter int ADDR_WIDTH,
+    parameter int DATA_WIDTH
+) (
+    input                       clk_a,
+    input                       wen_a,
+    input      [ADDR_WIDTH-1:0] addr_a,
+    input      [DATA_WIDTH-1:0] din_a,
+    output reg [DATA_WIDTH-1:0] dout_a,
+    input                       clk_b,
+    input                       wen_b,
+    input      [ADDR_WIDTH-1:0] addr_b,
+    input      [DATA_WIDTH-1:0] din_b,
+    output reg [DATA_WIDTH-1:0] dout_b
+);
+    localparam int DEPTH = 1 << ADDR_WIDTH;
+
+    reg [DATA_WIDTH-1:0] mem [DEPTH-1:0];
+
+    always @(posedge clk_a) begin
+        if (wen_a)
+            mem[addr_a] <= din_a;
+        dout_a <= mem[addr_a];
+    end
+
+    always @(posedge clk_b) begin
+        if (wen_b)
+            mem[addr_b] <= din_b;
+        dout_b <= mem[addr_b];
+    end
+)
+----
+
+=== 写模式（Write Mode）
+
+|===
+| 模式 | 说明
+
+| Read-First | 读优先，读操作在写操作之前，即读写同一个地址时，读到的是旧数据
+| Write-First | 写优先，写操作在读操作之前，即读写同一个地址时，读到的是新数据
+| No Change | 不改变读数据，读操作和写操作互不影响
+| Read-Write | 读写操作互相影响，读操作在写操作之后
+|===
+
+=== Bit-Enable 和 Byte-Enable
+
+Bit-Enable 是指对内存的每一位都可以单独控制读写权限，Byte-Enable 是指对内存的每一个字节都可以单独控制读写权限。
+
+[source,systemverilog]
+----
+module SPRAM_BE #(
+    parameter int ADDR_WIDTH,
+    parameter int DATA_WIDTH,
+) (
+    input                       clk,
+    input                       wen,
+    input      [DATA_WIDTH-1:0] bitena,
+    input      [ADDR_WIDTH-1:0] addr,
+    input      [DATA_WIDTH-1:0] din,
+    output reg [DATA_WIDTH-1:0] dout
+);
+    localparam int DEPTH = 1 << ADDR_WIDTH;
+
+    reg [DATA_WIDTH-1:0] mem [DEPTH-1:0];
+
+    always @(posedge clk) begin
+        if (wen)
+            for (int i = 0; i < DATA_WIDTH; i++)
+                if (bitena[i])
+                    mem[addr][i] <= din[i];
+        dout <= mem[addr];
+    end
+endmodule
+----
+
+== FPGA 中内存的实现方式
+
+|===
+| 核心组件  | 说明                                   | 典型容量
+
+| FF        | 由 Flip-flop 实现的 RAM                | 几 bit ~ 几十 bit
+| LUT       | 由 LUT 实现的 RAM                      | 几 bit ~ 几十 bit
+| Block RAM | FPGA 内置的 RAM                        | 几 Kb ~ 几百 Kb
+| Ultra RAM | FPGA 内置的 RAM，通常比 Block RAM 更大 | 几百 Kb ~ 几 Mb
+|===

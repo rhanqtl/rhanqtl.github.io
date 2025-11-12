@@ -1,0 +1,287 @@
+---
+title: "浅析访问者模式"
+date: 2025-11-10
+tags: ["design-patterns"]
+summary: "访问者模式（Visitor Pattern）是一种常见的设计模式，本文将介绍其基本概念、实现方式及应用场景"
+---
+
+== 引言
+
+假设我们有如下的类层次结构：
+
+[source,cpp]
+----
+struct Expr {};
+
+struct BinaryExpr : public Expr {
+    Expr *left;
+    Expr *right;
+};
+struct LogicalAnd : public BinaryExpr {};
+struct LogicalOr : public BinaryExpr {};
+
+struct UnaryExpr : public Expr {
+    Expr *arg;
+};
+struct LogicalNot : public UnaryExpr {};
+
+struct Constant : public Expr {
+    bool value;
+};
+----
+
+现在我们想要对这个类层次结构实现一些操作，比如计算表达式的值，或者将表达式转换为字符串表示。最直观的方法是为每个类添加相应的成员函数：
+
+[source,cpp]
+----
+struct Expr {
+  virtual bool eval() = 0;
+  virtual std::string to_string() = 0;
+};
+
+struct LogicalAnd : public BinaryExpr {
+    bool eval() const override {
+        return left->eval() && right->eval();
+    }
+    std::string to_string() const override {
+        return "(" + left->to_string() + " && " + right->to_string() + ")";
+    }
+};
+
+struct LogicalOr : public BinaryExpr {
+    bool eval() const override {
+        return left->eval() || right->eval();
+    }
+    std::string to_string() const override {
+        return "(" + left->to_string() + " || " + right->to_string() + ")";
+    }
+};
+
+struct LogicalNot : public UnaryExpr {
+    bool eval() const override {
+        return !arg->eval();
+    }
+    std::string to_string() const override {
+        return "(!" + arg->to_string() + ")";
+    }
+};
+
+struct Constant : public Expr {
+    // ...
+
+    bool eval() const override {
+        return value;
+    }
+    std::string to_string() const override {
+        return value ? "true" : "false";
+    }
+};
+----
+
+这种方法的问题在于，每当我们想要添加一个新的操作（比如打印表达式树的结构），都需要修改所有的类，增加相应的方法。这违反了开闭原则（Open-Closed Principle），即类应该对扩展开放，对修改封闭。一种解决方案是将这些功能独立到各自的模块（例如函数或者类）中：
+
+[source,cpp]
+----
+struct PrettyPrinter {
+    // ... data members
+
+    std::string print(const Expr &expr) {
+        if (auto *and_expr = dynamic_cast<const LogicalAnd*>(&expr))
+            return "(" + print(*and_expr->left) + " && " + print(*and_expr->right) + ")";
+        else if (auto or_expr = dynamic_cast<const LogicalOr*>(&expr))
+            return "(" + print(*or_expr->left) + " || " + print(*or_expr->right) + ")";
+        else if (auto *not_expr = dynamic_cast<const LogicalNot*>(&expr))
+            return "(!" + print(*not_expr->arg) + ")";
+        else if (auto const_expr = dynamic_cast<const Constant*>(&expr))
+            return const_expr->value ? "true" : "false";
+        unreachable();
+    }
+};
+----
+
+这种方法虽然避免了修改类本身，但引入了几个新的问题：
+
+. 大量的类型检查和转换代码，每一个功能模块都要重复一次，而且无法保证类型检查的一致性
+. 各功能模块没有统一的接口，难以管理和扩展
+. 对于需要处理非叶子类的情况，还要小心地安排检查的顺序
+
+读者可能会想到用模板（为了简化代码，我们假设 `R` 不会为 ``void``）：
+
+[source,cpp]
+----
+template <typename DerivedT, typename R>
+struct Traverser {
+    R handle(const Expr &expr) {
+        if      (auto *and_expr   = dynamic_cast<const LogicalAnd*>(&expr)) return handle(*and_expr);
+        else if (auto *or_expr    = dynamic_cast<const LogicalOr*>(&expr))  return handle(*or_expr);
+        else if (auto *not_expr   = dynamic_cast<const LogicalNot*>(&expr)) return handle(*not_expr);
+        else if (auto *const_expr = dynamic_cast<const Constant*>(&expr))   return handle(*const_expr);
+        unreachable();
+    }
+    R handle(const LogicalAnd &expr) {
+        if constexpr (/* overridden */) return derived()->handle(expr);
+        else                            return handle_default(expr);
+    }
+    R handle(const LogicalOr &expr) {
+        if constexpr (/* overridden */) return derived()->handle(expr);
+        else                            return handle_default(expr);
+    }
+    R handle(const LogicalNot &expr) {
+        if constexpr (/* overridden */) return derived()->handle(expr);
+        else                            return handle_default(expr);
+    }
+    R handle(const Constant &expr) {
+        if constexpr (/* overridden */) return derived()->handle(expr);
+        else                            return handle_default(expr);
+    }
+
+ protected:
+  R handle_default(const LogicalAnd &expr) { return _merge(handle(*expr.left), handle(*expr.right)); }
+  R handle_default(const LogicalOr  &expr)  { return _merge(handle(*expr.left), handle(*expr.right)); }
+  R handle_default(const LogicalNot &expr) { return handle(*expr.arg); }
+  R handle_default(const Constant   &expr)   { return R{}; }
+
+ private:
+  DerivedT *derived() { return static_cast<DerivedT*>(this); }
+
+ private:
+  using MergeFn = std::function<R(R, R)>;
+  MergeFn _merge;
+};
+----
+
+这样一来，我们就可以这样定义 ``PrettyPrinter``：
+
+[source,cpp]
+----
+struct PrettyPrinter : public Traverser<PrettyPrinter, std::string> {
+    std::string handle(const LogicalAnd &expr) {
+        return "(" + handle(*expr.left) + " && " + handle(*expr.right) + ")";
+    }
+    std::string handle(const LogicalOr &expr) {
+        return "(" + handle(*expr.left) + " || " + handle(*expr.right) + ")";
+    }
+    std::string handle(const LogicalNot &expr) {
+        return "(!" + handle(*expr.arg) + ")";
+    }
+    std::string handle(const Constant &expr) {
+        return expr.value ? "true" : "false";
+    }
+};
+----
+
+虽然解决了前面提出的问题，但是似乎更麻烦了！不过有一点好处是，现在子类可以只重写它们关心的节点类型的处理方法，而不需要重复类型检查代码。例如，要统计表达式中 `LogicalAnd` 节点的数量，我们只需要重写对应的方法：
+
+[source,cpp]
+----
+struct CountAnd : public Traverser<CountAnd, std::size_t> {
+    std::size_t handle(const LogicalAnd &expr) {
+        return 1 + handle_default(expr);
+    }
+};
+----
+
+我们甚至可以进一步调整框架，去掉 `handle_default` 的调用，不过这超出了本文的范围。
+
+
+实际上我们现在已经发明出了本文要讨论的访问者（Visitor）模式，只不过表现形式跟教科书上的不一样。
+
+== 教科书上的访问者模式
+
+一般教科书上的访问者模式都是基于虚函数实现的：
+
+[source,cpp]
+----
+struct Visitor {
+    virtual void visit(const LogicalAnd &expr) { traverse(expr); }
+    virtual void visit(const LogicalOr  &expr) { traverse(expr); }
+    virtual void visit(const LogicalNot &expr) { traverse(expr); }
+    virtual void visit(const Constant   &expr) { traverse(expr); }
+
+    // Walk down
+    void traverse(const LogicalAnd &expr) { visit(*expr.left); visit(*expr.right); }
+    void traverse(const LogicalOr  &expr) { visit(*expr.left); visit(*expr.right); }
+    void traverse(const LogicalNot &expr) { visit(*expr.arg); }
+    void traverse(const Constant   &expr) { }
+
+    virtual ~Visitor() = default;
+};
+----
+
+每个类都需要加上 ``accept`` 成员函数，例如
+
+[source,cpp]
+----
+struct LogicalAnd : public Expr {
+  // ... unchanged
+
+  void accept(Visitor &vis) override {
+    vis.visit(*this);
+  }
+}
+----
+
+这样前面的 `CountAnd` 就可以实现为：
+
+[source,cpp]
+----
+struct CountAnd : public Visitor {
+    int n{0};
+
+    void visit(LogicalAnd &expr) {
+        Visitor::visit(expr);
+        n++;
+    }
+};
+----
+
+这种实现方式是最常见的。它简化了 `Visitor` 的代码，彻底去掉了 ``dynamic_cast``（或者反射，如果是 Java）——实际上是把复杂度均摊到了每个类中，依赖动态分派机制——代价是 `visit` 无法精确地返回某种类型，最多只能使用 ``std::any``（$$C++$$ 不允许虚函数为函数模板）。
+
+== 基于 CRTP 的访问者模式
+
+除了 <<引言>> 中介绍的基于模板的方法之外，还有一种折中的方法，结合了虚函数和模板的优点：
+
+[source,cpp]
+----
+struct BinaryExpr : public Expr {
+    template <typename VisitorT>
+    void visit_children(VisitorT &vis) {
+        vis.visit(left);
+        vis.visit(right);
+    }
+};
+
+template <typename DerivedT>
+struct Visitor {
+    template <typename T>
+    void visit(T &t) {
+        if constexpr (requires { derived()->handle(t); }) {
+            derived()->handle(t);
+        } else {
+            visit_default(t);
+        }
+    }
+
+    template <typename T>
+    void visit_default(T &t) {
+        if constexpr (requires { t.visit_children(*this); }) {
+            t.visit_children(*this);
+        }
+    }
+};
+----
+
+== 双分派（Double-Dispatch）
+
+某种程度上，访问者模式是为了解决双分派问题。像 $$C++$$ 和 Java 都只支持单分派（single-dispatch），也就是被调函数取决于调用对象的__运行时类型__，而所谓双分派，是指函数的选择可以依赖于两个对象的运行时类型——在访问者模式中，这两个对象分别是元素对象（例如 `LogicalAnd`）和访问者对象（例如 `PrettyPrinter`）。将 `accept` 放在元素类中，是因为我们认为它是最了解自己应该如何被访问的；而如果有双分派，我们就不需要它了。
+
+需要注意的是，尽管访问者模式通常跟遍历树结合起来，但实际上对于单独的对象也可以使用。
+
+== 总结
+
+访问者模式是一种强大的设计模式，能够帮助我们将操作与数据结构分离，促进代码的可维护性和扩展性。通过本文介绍的几种实现方式，我们可以根据具体需求选择最合适的方法来实现访问者模式。
+
+[bibliography]
+== 参考资料
+
+. https://en.wikipedia.org/wiki/Double_dispatch
