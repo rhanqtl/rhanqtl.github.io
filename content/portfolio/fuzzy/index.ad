@@ -1,7 +1,7 @@
 ---
 title: "Fuzzy — 用于随机测试向量生成的 C++ DSL"
 summary: "本文介绍了一个用于随机测试向量生成的 C++ 库，名为 fuzzy，它采用类 SystemVerilog 风格的内部 DSL。"
-tags: ["sat", "smt", "atpg", "fuzzing", "c++", "dsl", "constraint", "systemverilog"]
+tags: ["sat", "smt", "atpg", "fuzzing", "cxx", "dsl", "constraint", "systemverilog"]
 draft: true
 ---
 

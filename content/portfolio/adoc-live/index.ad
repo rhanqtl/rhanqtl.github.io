@@ -1,0 +1,32 @@
+---
+title: "AsciiDoc Live"
+description: "— 面向 AsciiDoc 的 Hugo 主题"
+tags: ["hugo"]
+---
+
+NOTE: GitHub 仓库：link:https://github.com/rhanqtl/hugo-adoc-live[]
+
+AsciiDoc Live（简称为“adoc-live”）是一个面向用 AsciiDoc 写作的长篇技术文章的极简 Hugo 主题，本网站即使用该主题搭建。
+
+== 亮点
+
+相对于 Hugo 生态中的通用主题：
+
+- 面向长篇技术写作而不是通用博客首页：默认布局围绕正文栏、页内目录、文章元信息、标签、相邻文章和打印阅读体验组织
+- AsciiDoc 是一等公民：主题从配置、archetype、示例站到 CSS/JS 都围绕 `.adoc` 工作流设计，不需要把复杂技术文档降级成 Markdown
+- 轻量级：不依赖前端框架，核心阅读、导航、脚注跳转和 Asciidoctor 原生返回链接在禁用 JavaScript 时仍可用
+- 读者体验完整：内置明暗模式、阅读进度、手动字号缩放、目录高亮、代码复制、reduced-motion 和移动端折叠目录
+- 更适合中英文技术内容：正文默认使用 Inter + Noto Sans SC 字体栈，代码块保留 Maple Mono，并为 CJK 站点给出直接可用的配置
+- 技术文章常用能力开箱即用：LaTeX 数学公式、Chroma 语法高亮、Compiler Explorer 与 C++ Insights 嵌入都已有主题级集成
+
+相对于 Hugo 生态中其他支持 AsciiDoc 的主题：
+
+- 目标不是“能渲染 `.adoc`”，而是尽量覆盖 Asciidoctor HTML5 的完整语义结构，包括 admonition、sidebar/example/open block、callout、各类列表、表格、脚注和 bibliography
+- 直接样式化 Asciidoctor 输出，而不是依赖 Markdown render hook；AsciiDoc 原生结构进入 Hugo 后仍保持可读、可导航、可打印
+- 脚注体验更完整：保留 Asciidoctor 原生脚注跳回，并为重复具名脚注补充每一处引用位置的返回链接
+- 文献引用可往返：Asciidoctor 原生 bibliography 负责前向跳转，主题脚本为同一文献的多次引用补充返回链接
+- 数学公式沿用 Asciidoctor 原生 `latexmath` / `stem` 语法；主题按页面自动判断是否加载 MathJax，普通页面不会额外加载数学脚本
+- 跨页面引用使用 Hugo Page 解析：`xref` shortcode 生成 permalink 感知链接，目标不存在时构建失败，避免静默留下坏链接
+- AsciiDoc 源码块会在模板层接入 Hugo Chroma，同时保留 Asciidoctor callout 标记，不需要额外安装 Rouge 才能得到主题一致的高亮
+- sidebar 与 `sidenote` role 有响应式布局：宽屏时边注进入正文右侧，窄屏时回到正文流，不牺牲移动端阅读顺序
+- README 和示例站覆盖 `toc = "auto"`、`workingFolderCurrent`、`security.exec.allow`、扩展加载等 Hugo + Asciidoctor 关键配置，便于把真实文档站迁移到主题上
