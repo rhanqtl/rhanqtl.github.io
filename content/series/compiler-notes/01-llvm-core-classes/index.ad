@@ -1,0 +1,58 @@
+---
+title: "Static Single Assignment"
+date: 2026-04-11
+tags: ["compiler", "llvm"]
+draft: true
+---
+
+== Variable vs. Value
+
+在 $$C/C++$$ 这样的命令式语言中，“variable”跟“value”是两个正交的概念——一个“variable”表示一个内存地址，而一个“value”表示一个计算结果，它们通过 load/store 关联起来（以 ``a = b`` 为例，这里实际上有一个 ``v = load b`` 用于将 b 的值读出来，然后再 ``store a, v`` 将值 `v` 写入到 ``a`` 代表的内存地址中）；在 Haskell 这样的纯函数式语言中（不可变），“variable”实际上就是给“value”的一个名字（可以理解为 variable 实际上变成了 value 的附属品），这就是所谓的“binging”。
+
+== SSA
+
+SSA 基于后者——消除了“variable”的概念，一个“value”有一个名字，这样可以极大简化编译优化，因为不需要再考虑一个变量在不同上下文中有不同值的情况。
+
+SSA 引入的一个问题是，如果一个变量在不同的分支中被赋予了不同的值，如何在汇聚点表示这种分歧。SSA 的答案是 PHI 节点，对于下面的代码，SSA 形式如下：
+
+[source,cpp]
+----
+void foo(int a) {
+  if (a > 0)
+    b = 3;
+  else
+    b = 4;
+  bar(b);
+}
+----
+
+[source,text]
+----
+func foo(a: int) {
+^entry:
+  c = a > 0
+  cbr c, ^if_true, ^if_false
+
+^if_true:
+  b_0 = 3
+  br ^join
+
+^if_false
+  b_1 = 4
+
+^join:
+  b_join = PHI(b_0, b_1)
+  call @bar(b_join)
+}
+----
+
+=== Dominator Tree
+
+SSA 中另一个非常重要的概念是 dominator tree，tata
+
+
+== LLVM 中的 SSA
+
+LLVM 中定义了 `Value` 用来表示一个 SSA value：
+
+

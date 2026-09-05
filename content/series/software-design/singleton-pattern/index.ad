@@ -1,0 +1,298 @@
+---
+title: "浅析单例模式"
+date: 2025-12-09
+tags: ["design-patterns"]
+summary: "单例模式（Singleton Pattern）是一种常见的设计模式，本文将介绍其基本概念、实现方式及应用场景"
+draft: true
+---
+
+== 引言
+
+在程序设计中，我们经常会遇到这样一种需求：确保每个类只有确定数量的实例（通常是一个）。读者可能会想到用全局变量：
+
+[source,cpp]
+----
+// MyClass.h
+// The class we want to have only one instance of.
+class MyClass { /* ... */ };
+extern MyClass the_instance;
+
+// MyClass.cpp
+MyClass the_instance;
+
+// User1.cpp
+#include "MyClass.h"
+
+// User2.cpp
+#include "MyClass.h"
+----
+
+这种方式最突出的问题在于，截止到今天（2025 年 12 月），$$C++$$ 并没有定义全局变量的初始化顺序，因此可能会出现访问未初始化的全局变量的问题；即使在当前 library/executable 中我们能控制初始化顺序，但在跨多个 library/executable 的情况下，这个问题就会变得更加复杂。
+
+== Nifty Counters
+
+有一种称为“nifty counters”的技术可以解决这个问题。它的核心思想是使用引用计数来确保使用之前必须经过构造：
+
+[source,cpp]
+----
+// MyClass.h
+class MyClass { /* ... */ };
+
+class MyClassCounter {
+ public:
+  MyClassCounter() {
+    if (counter == 0) the_instance = new MyClass{};
+    ++counter;
+  }
+  ~MyClassCounter() {
+    counter--;
+    if (counter == 0) {
+      delete the_instance;
+      the_instance = nullptr;
+    }
+  }
+
+ private:
+  static std::size_t counter_;
+};
+
+extern MyClass *the_instance;
+static MyClassCounter counter;
+
+// MyClass.cpp
+MyClass *the_instance = nullptr;
+std::size_t MyClassCounter::counter_ = 0;
+
+// User1.cpp and User2.cpp not changed
+----
+
+这样还是比较麻烦
+
+== Meyers' Singleton
+
+Scott Meyers 提出的单例模式是一个更简洁的实现方式。它利用了局部静态变量的特性，确保在多线程环境下也能安全地创建单例实例（C++11 开始）：
+
+[source,cpp]
+----
+// MyClass.h
+class MyClass {
+ public:
+  static MyClass &Instance() {
+    static MyClass instance;
+    return instance;
+  }
+  ~MyClass() { /* Cleanup code if needed */ }
+
+ private:
+    MyClass() = default;
+    MyClass(const MyClass&) = delete;
+    MyClass& operator=(const MyClass&) = delete;
+    MyClass(MyClass&&) = delete;
+    MyClass& operator=(MyClass&&) = delete;
+};
+
+// User1.cpp and User2.cpp not changed
+----
+
+== 传入构造参数
+
+Meyers' singleton 有个短板是它不支持构造参数。有两种方式支持，第一种是增加一个 `Init` 函数：
+
+[source,cpp]
+----
+// MyClass.h
+class MyClass {
+  // Other code unchanged
+ public:
+  template <typename... Args>
+  void Init(Args&&... args) { /* initialization */ }
+};
+
+// User1.cpp and User2.cpp not changed
+----
+
+分配的资源依然在析构函数中释放。
+
+第二种方式是提供一个带参数的 `Instance` 函数：
+
+[source,cpp]
+----
+// MyClass.h
+class MyClass {
+  // Other code unchanged
+ public:
+  template <typename... Args>
+  void Instance(Args&&... args) {
+    static MyClass instance;
+    return instance;
+  }
+};
+
+// User1.cpp and User2.cpp not changed
+----
+
+== 构造和析构的时机
+
+在 Meyers' singleton 中，``instance`` 在第一次调用 `Instance` 时才会进行构造，如下是 Clang 20.1.0 产生的link:https://godbolt.org/z/fE6a7nbMK[汇编代码片段]：
+
+[source,asm]
+----
+MyClass::Instance():
+        pushq   %rbp
+        movq    %rsp, %rbp
+        cmpb    $0, guard variable for MyClass::Instance()::instance(%rip)    <1>
+        jne     .LBB1_3
+        leaq    guard variable for MyClass::Instance()::instance(%rip), %rdi
+        callq   __cxa_guard_acquire@PLT                                       <2>
+        cmpl    $0, %eax
+        je      .LBB1_3
+        leaq    MyClass::~MyClass() [base object destructor](%rip), %rdi
+        leaq    MyClass::Instance()::instance(%rip), %rsi
+        leaq    __dso_handle(%rip), %rdx
+        callq   __cxa_atexit@PLT                                              <3>
+        leaq    guard variable for MyClass::Instance()::instance(%rip), %rdi
+        callq   __cxa_guard_release@PLT                                       <4>
+.LBB1_3:
+        leaq    MyClass::Instance()::instance(%rip), %rax
+        popq    %rbp
+        retq
+----
+
+可以看到，``MyClass::Instance()`` 多了一些额外的代码：
+
+<1> 检查局部静态变量是否已经初始化
+<2> 如果没有初始化，调用 `__cxa_guard_acquire` 来获取初始化锁（``guard variable``）
+<3> 注册析构函数，确保程序结束时会调用析构函数
+<4> 调用 `__cxa_guard_release` 来释放初始化锁
+
+
+其中 `__cxa_atexit` 会将析构函数注册到一个全局的析构函数列表中（link:https://man7.org/tlpi/code/online/dist/procexec/exit_handlers.c.html[exit handlers]，在程序结束时会依次调用这些函数），它跟 `atexit` 共享同一个列表，这会有一些顺序上的问题。考虑如下代码：
+
+[source,cpp]
+----
+class MyClass {
+ public:
+  static MyClass &Instance() {
+    static MyClass instance;
+    return instance;
+  }
+  ~MyClass() { std::cout << "dtor\n"; }
+
+ private:
+    MyClass() {
+        std::cout << "ctor\n";
+    }
+    MyClass(const MyClass&) = delete;
+    MyClass& operator=(const MyClass&) = delete;
+    MyClass(MyClass&&) = delete;
+    MyClass& operator=(MyClass&&) = delete;
+};
+
+void foo() {
+    std::cout << __FUNCTION__ << '\n';
+    auto &inst = MyClass::Instance();
+}
+
+void bar() {
+    std::cout << __FUNCTION__ << '\n';
+    auto &inst = MyClass::Instance();
+}
+
+int main() {
+    atexit(foo);
+    bar();
+}
+----
+
+用 Clang 20.1.0 编译并运行，输出如下：
+
+----
+bar
+ctor
+dtor
+foo
+----
+
+也就是说，在 ``foo`` 中访问的 ``MyClass`` 实例已经被析构了。这种问题在实际应用中可能会引发严重的错误。修复这个问题的一种方式是确保 `MyClass::Instance` 在 `main` 函数开始时就被调用，从而确保它的析构函数在 `atexit` 注册的函数之后执行：
+
+[source,cpp]
+----
+// ... other code unchanged
+
+int main() {
+    { MyClass::Instance(); }
+    atexit(foo);
+    bar();
+}
+----
+
+不过这种方式比较讨巧，更可靠的做法是显式调用 `Init` 跟 `Destroy` 函数来管理生命周期，还能顺便解决构造参数的问题：
+
+[source,cpp]
+----
+// MyClass.h
+class MyClass {
+ public:
+  template <typename... Args>
+  static void Init(Args&&... args) {
+    static std::once_flag flag;
+    std::call_once(flag, [&]() {  <1>
+        instance_ = new MyClass{std::forward<Args>(args)...};
+    });
+  }
+  static void Destroy() {
+    delete instance_;
+    instance_ = nullptr;
+  }
+  static MyClass &Instance() {
+    return *instance;
+  }
+  ~MyClass() = default;
+
+ private:
+    template <typename... Args>
+    MyClass(Args&&... args) { /* initialization */ }
+
+    MyClass(const MyClass&) = delete;
+    MyClass& operator=(const MyClass&) = delete;
+    MyClass(MyClass&&) = delete;
+    MyClass& operator=(MyClass&&) = delete;
+
+ private:
+  static MyClass *instance_;
+};
+
+// MyClass.cpp
+MyClass *MyClass::instance_ = nullptr;
+
+void foo() { /* ... */ }
+void bar() { /* ... */ }
+
+int main() {
+    MyClass::Init(/* constructor args */);
+    atexit(MyClass::Destroy);
+
+    atexit(foo);
+    bar();
+}
+----
+
+<1> 使用 `std::call_once` 确保初始化只会执行一次；注意到我们使用了引用捕获，尽管看上去有点反直觉，但是还能够保证值类别（value category）正确，这是因为 `std::forward` 的推导来自模板参数 `Args` 而不是 lambda，cppinsignts.io 给出的结果有一些误导
+
+== 跨共享库单例
+
+== 异常安全性
+
+在前面显式调用 `Init`/`Destroy` 的实现中，我们还有一个细节没有处理干净：如果没有调用 `Init` 而直接调用 `Instance`，会导致访问未初始化的指针。我们可以在 `Instance` 中添加一个检查：
+
+== llvm::ManagedStatic
+
+llvm 提供了一个名为 `ManagedStatic` 的模板类来简化单例的实现。它封装了单例的生命周期管理，并确保在程序结束时正确析构：
+
+
+== 总结
+
+
+[bibliography]
+== 参考资料
+

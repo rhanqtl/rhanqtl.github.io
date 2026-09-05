@@ -1,0 +1,5 @@
+---
+title: "AIG 和 Sea of Nodes"
+summary: "根据工作经历，介绍一下逻辑综合中的 AIG 和编译器中的 sea of nodes 两种 IR 的设计"
+tags: ["compiler", "logic-synthesis", "eda", "aig", "sea-of-nodes"]
+---

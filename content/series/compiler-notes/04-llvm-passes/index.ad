@@ -1,0 +1,132 @@
+---
+title: "LLVM Pass 基础设施"
+date: 2026-04-12
+tags: ["compiler", "llvm"]
+draft: true
+---
+
+> 目前（2026 年 4 月），LLVM 中有两种 pass manager 并存，分别称为 legacy pass manager 和 new pass manager，它们对外 API 不同。
+
+== Legacy Pass Manager
+
+Legacy pass manager 为不同作用范围的 pass 提供了不同的基类：
+
+|===
+|作用范围 |需要继承 |需要重写
+
+|Module |`ModulePass` |`bool runOnModule(Module&)`
+
+|CGSCC |`CallGraphSCCPass` |`bool runOnSCC(CallGraphSCC&)`
+
+|Function |`FunctionPass` |`bool runOnFunction(Function&)`
+
+|Loop |`LoopPass` |`bool runOnLoop(Loop*, LPPassManager&)`
+
+|Region |`RegionPass` |`bool runOnRegion(Region*, GPassManager&)`
+
+|MachineFunciton |`MachineFunctionPass` |`bool runOnMachineFunction(MachineFunction&)`
+|===
+
+一个典型的 pass 如下：
+
+[source,cpp]
+----
+class MyOptim : public FunctionPass {
+  static char ID;  <1>
+
+ public:
+  MyOptim() : FunctionPass{ID} {}
+
+  void MyOptim::getAnalysisUsage(AnalysisUsage &AU) {
+    AU.addRequired<A>();
+    if (/* check if B is actually needed */)
+      AU.addRequired<B>();
+    AU.addRequired<C>();
+
+    AU.setPreserved<D>();
+  }
+};
+char MyOptim::ID = 0;
+
+INITIALIZE_PASS_BEGIN(MyOptim, /*arg*/ "my-optim", /*name*/ "Example optimization", /*cfg*/ false, /*analysis*/ false)  <2>
+INITIALIZE_PASS_DEPENDENCY(A)  <3>
+INITIALIZE_PASS_DEPENDENCY(B)
+INITIALIZE_PASS_DEPENDENCY(C)
+INITIALIZE_PASS_END  (MyOptim, "my-optim", "Example optimization", false, false)  <4>
+
+namespace llvm {
+void initializeMyOptimPass(PassRegistry&);  <5>
+}
+----
+
+<1> 用于 LLVM 的 RTTI 机制
+<2> 如果没有依赖任何 analysis，可以直接使用 ``INITIALIZE_PASS``，参数相同；legacy pass manager 并没有通过类型系统区分 pass 和 analysis，因此需要一个额外参数 `analysis` 来标记
+<3> 所有**可能**依赖的 analysis 都要注册
+<4> 参数跟 `INITIALIZE_PASS_BEGIN` 相同
+<5> 特别注意函数名最后的 `Pass`
+
+另外，还需要在某处（例如，``main`` 函数或者 pass 的构造函数中）调用 ``initializeMyOptimPass``：
+
+[source,cpp]
+----
+PassRegistry &registry = /* *PassRegistry::getPassRegistry() */ ;
+llvm::initializeMyOptimPass(registry);
+----
+
+== New Pass Manager
+
+|===
+|作用范围 |需要提供的成员函数
+
+|Module |`Result run(Module &M, ModuleAnalysisManager &AM)`
+
+|CGSCC |`Result run(LazyCallGraph::SCC &C, SGSCCAnalysisManager &AM, LazyCallGraph &CG, CGSCCUpdateResult &UR)`
+
+|Function |`Result run(Function &F, FunctionAnalysisManager &FAM)`
+
+|Loop |`Result run(Loop &L, LoopAnalysisManager &AM, LoopStandardAnalysisResults &AR, LPMUpdater &U)`
+|===
+
+其中 `Result` 对于 pass 而言总是 ``PreservedAnalyses``，而对 analysis 而言是其结果的数据结构（LLVM 认为 analysis 不应该修改 IR）
+
+=== 定义和注册一个 Analysis
+
+[source,cpp]
+----
+class MyAnalysis : public AnalysisInfoMixin<MyAnalysis> {
+  friend AnalysisInfoMixin<MyAnalysis>;
+
+  static AnalysisKey key;
+
+ public:
+  using Result = MyAnalysisInfo;
+  MyAnalysisInfo run(Function &F, FunctionAnalysisManager &AM);
+};
+AnalysisKey MyAnalysis::Key;
+----
+
+在某处注册：
+
+[source,cpp]
+----
+FunctionAnalysisManager FAM;
+FAM.registerPass([] { return MyAnalysisInfo(); });
+----
+
+=== 定义和注册一个 Pass
+
+[source,cpp]
+----
+class MyOptim : public PassInfoMixin<MyOptim> {
+  friend PassInfoMixin<MyOptim>;
+
+ public:
+  PerservedAnalyses run(Function &F, FunctionAnalysisManager &AM) {
+    // ... do something
+
+    PreservedAnalyses PA;
+    PA.preserveSet<MyAnalysis>();
+    return PA;
+  }
+};
+----

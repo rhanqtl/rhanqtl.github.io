@@ -140,3 +140,24 @@ int main() {
 fuzzy 还提供了 `validate<T>` 来验证一个对象是否满足约束
 
 为了得到一个随机序列，多次调用 `fuzzy::randomize<T>` 即可
+
+
+可以良好支持的
+SV 特性	C++ DSL 写法	差异
+foreach(arr[i])	for_each_i(arr, [&](auto& i, auto& e) {...})	lambda 代替
+unique {a,b,c}	unique(a, b, c)	几乎一样
+soft x == 5	soft(x == 5)	函数包装
+solve x before y	solve_before(x, y)	函数调用
+x[3:0] (bit slice)	x.bits(3, 0)	方法调用
+arr.sum()	arr.sum()	完全一样
+&& || !	&& || !	完全一样
++ - * / %	+ - * / %	完全一样
+== != < > <= >=	== != < > <= >=	完全一样
+constraint_mode	model.enable("name")	API 形式
+总结
+真正的硬伤只有 3 个半：
+if-else 条件约束 — 影响最大，SV 里非常常用
+函数调用 — 需要 fuzzy::func 包装
+-> 蕴含 / ?: 三元 — 需要换成函数形式
+(半个) 链式比较 — 可以用 ChainableExpr hack 解决
+其中 if-else 是最痛的，因为条件约束在实际建模中非常高频。如果这个对你来说是 deal-breaker，那 external DSL 确实值得认真考虑。如果能接受 when(..., then, else) 的写法，内部 DSL 就够用了。

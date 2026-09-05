@@ -1,7 +1,8 @@
 # Basic configuration
 baseURL: "https://blog.rhanqtl.com/"
-title: rhanqtl
-theme: PaperMod
+title: rhanqtl's blog
+author: rhanqtl
+theme: adoc-live
 
 # Navigation bar related configuration
 #sectionPagesMenu: main
@@ -31,8 +32,8 @@ defaultContentLanguage: zh
 languages:
   zh:
     disabled: false
-    languageCode: zh
-    languageName: "简体中文"
+    locale: zh
+    label: "简体中文"
     weight: 10
   # zh-TW:
   #   disabled: false
@@ -47,7 +48,7 @@ languages:
 
 markup:
   tableOfContents:
-    ordered: true
+    # ordered: true
   asciidocExt:
     attributes:
       toc: left
@@ -88,6 +89,9 @@ params:
       #- name: Archive
       #  url: "/archive"
 
+  eyebrow: ""
+  title: "欢迎来到 rhanqtl 的个人网站！"
+
   socialIcons:
   - name: "GitHub"
     url: "https://github.com/rhanqtl"
@@ -123,3 +127,6 @@ outputs:
 services:
   disqus:
     shortname: blog-6cqjzlgkbx
+
+ignoreFiles:
+  - "venv/*"

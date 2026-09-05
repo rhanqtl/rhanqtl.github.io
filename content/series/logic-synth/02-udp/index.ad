@@ -1,0 +1,64 @@
+---
+title: "第 2 章：从 UDP 综合说起"
+date: 2026-05-12
+tags: ["logic-synth", "fpga", "verilog", "hdl"]
+draft: true
+---
+
+== UDP 是什么
+
+UDP 的全称为 User Defined Primitive，即用户定义的原语。它是 Verilog 中的一种特殊构造，允许设计者定义自己的基本逻辑单元。这些单元可以是组合逻辑、时序逻辑或者更复杂的状态机。UDP 的主要作用是提供一种灵活的方式来描述和实现特定的逻辑功能，特别是在 FPGA 设计中。
+
+下面是一个组合逻辑 UDP 的示例：
+
+[source,verilog]
+----
+primitive mux2 (out, a, b, sel);
+  output out;
+  input a, b, sel;
+
+  table
+    // sel a b : out
+       0   ? ? : a;
+       1   ? ? : b;
+  endtable
+----
+
+下面是一个时序逻辑 UDP 的示例：
+
+[source,verilog]
+----
+primitive dff (q, d, clk);
+  output q;
+  input d, clk;
+
+  reg q;
+
+  table
+    // clk  d : q
+       (01) ? : q; // 上升沿保持不变
+       (10) ? : q; // 下降沿保持不变
+       (1?) ? : d; // 上升沿更新为 d
+       (0?) ? : q; // 下降沿保持不变
+  endtable
+----
+
+为什么从 UDP 综合说起呢？因为 UDP 跟真值表很接近，有助于我们丝滑地从布尔逻辑转换到综合的世界。
+
+UDP 中允许的字符如下：
+
+|===
+| 字符   | 说明
+
+| `0`    | 逻辑 0
+| `1`    | 逻辑 1
+| `x`    | 不关心，也就是我们后面常常会提到的 don't care
+| `?`    | 通配符，表示 0/1/x 都可以
+| `-`    | 不变化
+| `(MN)` | 边沿，M=0 N=1 表示上升沿，M=1 N=0 表示下降沿
+| `*`    | 任意边沿
+|===
+
+== 组合逻辑 UDP 的综合
+
+

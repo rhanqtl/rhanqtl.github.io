@@ -1,3 +1,6 @@
 [submodule "themes/PaperMod"]
 	path = themes/PaperMod
 	url = https://github.com/adityatelange/hugo-PaperMod.git
+[submodule "themes/adoc-live"]
+	path = themes/adoc-live
+	url = git@github.com:rhanqtl/hugo-adoc-live.git

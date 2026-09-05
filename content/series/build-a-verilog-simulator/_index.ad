@@ -1,0 +1,5 @@
+---
+title: "手搓 SystemVerilog 仿真器"
+summary: "本系列介绍如何从零开始实现一个事件驱动（event-driven）的 SystemVerilog 仿真器"
+draft: true
+---

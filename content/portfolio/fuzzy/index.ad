@@ -1,0 +1,21 @@
+---
+title: "Fuzzy — 用于随机测试向量生成的 C++ DSL"
+summary: "本文介绍了一个用于随机测试向量生成的 C++ 库，名为 fuzzy，它采用类 SystemVerilog 风格的内部 DSL。"
+tags: ["sat", "smt", "atpg", "fuzzing", "c++", "dsl", "constraint", "systemverilog"]
+draft: true
+---
+
+== 核心难点
+
+=== DSL 的设计
+
+SystemVerilog 提供了 dist、unique、inside 等 operator，这些都是 $$C++$$ 所没有的，那么就有如下的选择：
+
+. $$C++26$$ 的静态反射——显然不行，做出来了没什么实际意义
+. 基于元编程的内部 DSL——可以考虑，但是可能会很丑，而且宏不是图灵完备的，有些特性可能无法支持
+. 通过修改 Clang 扩展 $$C++$$ 语法——最强大，但是太重
+. 自己实现一个类 $$C++$$ 的外部 DSL——同样强大，但是重点是另一个 Clang，费力不讨好
+
+=== 类型系统
+
+如何支持嵌套的用户自定义类型，例如 ``std::vector<Data>``？

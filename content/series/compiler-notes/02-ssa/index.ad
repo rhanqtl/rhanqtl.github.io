@@ -1,0 +1,93 @@
+---
+title: "LLVM 核心类"
+date: 2026-04-11
+tags: ["compiler", "llvm"]
+draft: true
+---
+
+== 控制流图
+
+LLVM 中用控制流图的概念构建函数（Function/MachineFunction）体，它的核心概念是 basic block 和边。在 LLVM 中，Basic block 包含一组连续的指令（Instruction/MachineInstr），必须符合所谓的“single entry single exit”概念，即只能有一个入口，就是其中包含的第一条指令，只能有一个出口，就是其最后一条指令（所谓的“terminator”），此外，我们通常认为 basic block 是“最长”的，也就是说不能通过扩展边界得到一个包含更多指令且符合 single entry single exit 的 basic block.
+
+
+[source,cpp]
+----
+int gcd(int a, int b) {
+    if (a < b)
+        std::swap(a, b);
+    while (b != 0) {
+        int r = a % b;
+        a = b;
+        b = r;
+    }
+    return a;
+}
+----
+
+其控制流图如下：
+
+[source,text]
+----
+function gcd(a: int, b: int) -> int {
+^entry:
+  cbr a < b, ^swap, ^loop_cond
+
+^swap:
+  swap a, b
+  br ^loop_cond
+
+^loop_cond:
+  cbr b != 0, ^loop_body, ^exit
+
+^loop_body:
+  r = a % b
+  a = b
+  b = r
+  br ^loop_cond
+
+^exit:
+  return a
+}
+----
+
+=== 可规约 CFG（Reducible CFG）
+
+可规约 CFG 指的是可以通过重复如下过程转换成仅包含单个 basic block 的 CFG：
+
+. 移除指向自己的边
+. 如果 basic block B 只有一个前驱 A，那么将 A 和 B 合并，并将 B 到后继的边的起点改为 A
+
+前面展示的 GCD 算法就是一个可规约图，一种可能的转换序列如下：
+
+. 合并 `^entry` 和 `^swap`
+. 合并 ``^loop_cond``、``^loop_body`` 和 ``^exit``
+. 移除 ``^loop_cond`` 指向自己的边
+. 合并 ``^entry`` 和 ``^loop_cond``
+
+不是可规约 CFG 的成为非可规约 CFG（irreducible CFG），例如：
+
+[source,c]
+----
+int irreducible(int shouldSkip1stCall) {
+  int i = 0;
+  if (shouldSkip1stCall)
+    goto SKIP;
+  do {
+    someFct();
+    SKIP:;
+  } while (++i < 7);
+  return 32;
+}
+----
+
+该函数中通过 `goto` 直接跳到了循环体中，是典型的不可规约 CFG.
+
+现实世界中可能会产生不可规约 CFG 的场景包括：
+
+- 直接使用 goto 语句
+- Duff's device 算法
+- 异常处理/RAII
+- 生成的代码，例如 Lex 和 Yacc 生成的代码
+
+LLVM 提供了 `containsIrreducibleCFG` 用于判断 Function 的 CFG 是否是不可规约的，还提供了 ``FixIrreduciblePass``（仅用于 LLVM IR）将不可规约 CFG 转换为可规约 CFG.
+

@@ -1,0 +1,151 @@
+---
+title: "第 0x 节：RTL elaboration 和逻辑综合"
+summary: "如题"
+tags: ["compiler", "verilog", "systemverilog", "simulation", "simulator", "logic-synth"]
+---
+
+== RTL elaboration
+
+RTL elaboration 是将 RTL 的行为级（behavioral）模型转换为结构级（structural）模型的过程，其中的工作包括：
+
+* 运算符的转换
+* DFF、DLATCH、MUX 等 gate 原语（primitive）的识别
+* Memory 的识别
+
+例如，下面的行为级 SystemVerilog 代码：
+
+[source,systemverilog]
+----
+module dff_example (input clk, /* ports omitted */);
+  always @(posedge clk) begin
+    q1 <= d;
+    q2 <= ~d;
+  end
+endmodule
+
+module dlatch_example (input clk, /* ports omitted */);
+  always @(posedge clk) begin
+    if (c)
+      q1 <= d;
+    else
+      q2 <= d;
+  end
+endmodule
+
+module spram_example (input clk, /* ports omitted */);
+  reg [7:0] mem [0:255];
+
+  always @(posedge clk) begin
+    if (wea)
+      mem[addr] <= din;
+    dout <= mem[addr];
+  end
+endmodule
+----
+
+经过 RTL elaboration 后，可能的结构级模型如下：
+
+[source,systemverilog]
+----
+module dff_example (input clk, /* ports omitted */);
+  not (d_n, d);
+  DFF dff_1 (.clk(clk), .d(d), .q(q1));
+  DFF dff_2 (.clk(clk), .d(d_n), .q(q2));
+endmodule
+
+module dlatch_example (input clk, /* ports omitted */);
+  not (c_n, c);
+  DLATCH dlatch_1 (.clk(clk), .en(c), .d(d), .q(q1));
+  DLATCH dlatch_2 (.clk(clk), .en(c_n), .d(d), .q(q2));
+endmodule
+
+module spram_example (input clk, /* ports omitted */);
+  SPRAM #(.CONFLICT("read_first")) spram (.clk(clk), .wea(wea), .addr(addr), .din(din), .dout(dout));
+endmodule
+----
+
+* Datapath 的识别
+
+== 题外话：MLIR 的 SCF 方言
+
+SCF 方言的结构跟 RTL elaboration 的思路很相似，例如其 ``scf.if``（被称为“Value-Producing Regions”）：
+
+[source,mlir]
+----
+%res = scf.if %cond -> (i32) {
+  %c1 = arith.constant 1 : i32
+  scf.yield %c1 : i32
+} else {
+  %c0 = arith.constant 0 : i32
+  scf.yield %c0 : i32
+}
+----
+
+这种结构几乎就是一个 MUX：
+
+[source,systemverilog]
+----
+MUX mux (.c(cond), .i0(0), .i1(1), .q(res));
+----
+
+至于为什么 SCF 会选择这种结构，Gemini 给的答案是：
+
+[quote]
+____
+直观上看，scf.for 和普通的 while 循环在逻辑上是等价的，但从编译器工程的角度来看，这种“结构化”建模通过将隐式的图形关系转化为显式的局部属性，极大地降低了算法实现的复杂度和运行成本。
+
+理解这一点，需要对比传统的 CFG (Control Flow Graph) 建模（如 LLVM IR）与 MLIR 的 Structured IR 建模。
+
+**概括要点**
+
+. 从“全局关系”转为“局部属性”： 循环变量的传递不再依赖于复杂的边遍历，而是直接定义在 Op 的签名上。
+. 显式化迭代依赖 (Loop-carried Dependencies)： 哪些变量在迭代间传递一眼可见，无需通过分析 phi 节点和回跳边来推断。
+. 支配关系 (Dominance) 的天然保障： 嵌套结构让变量的作用域受到严格的物理限制，简化了支配树的计算。
+. 分析算法的复杂度降低： 许多分析从“图论中的固定点迭代”简化为了“树状结构的单次遍历”。
+
+**1. 显式化迭代依赖 (Loop-carried Dependencies)**
+
+在传统的基于 Block + Phi 的 CFG 中，如果你想知道一个变量在循环中是如何更新的，你需要：
+
+. 找到循环头部的 phi 节点。
+. 分析该 phi 节点的所有来源。
+. 追踪哪一条来源边是“回跳边（Back-edge）”。
+
+而在 scf.for 中，iter_args 强制要求你将迭代间传递的值写在“明面上”：
+
+* 输入： iter_args 的初始值。
+* 更新： yield 的操作数。
+* 输出： scf.for 的返回值。
+
+分析难度降低的体现： 编译器在做副作用分析或常量传播时，只需要观察这一个 Op 及其 yield 语句，而不需要在整个控制流图上游走。这就像是从“在一个复杂的迷宫里找路”变成了“看一张已经标注好进出口的流程图”。
+
+**2. 支配关系 (Dominance) 的“免费”获得**
+
+在 SSA 形式中，一个变量的使用必须被其定义所支配（Dominate）。
+
+* 在 CFG 中： 编译器必须运行代价昂贵的 DominatorTree 算法，来确定 Block A 是否在所有通往 Block B 的路径上。
+* 在 MLIR 中： 由于 Region 是嵌套的，支配关系通常由物理结构保证。如果一个变量定义在 scf.if 之外，那么在它的 then 块和 else 块里，这个变量天然就是可见且被支配的。
+
+EDA 场景类比： 这就像是层次化设计 (Hierarchical Design) 与 打平设计 (Flattened Design) 的区别。在层次化设计中，模块内部的信号范围受到物理边界的限制，你不需要去扫描整个芯片就能确定一个信号的驱动源。
+
+**3. 简化固定点迭代 (Fixed-point Iteration)**
+
+在进行数据流分析（如 Reachable Definitions 或 Type Inference）时，CFG 往往需要进行多次迭代直到状态稳定（到达固定点）。
+
+* CFG 分析： 因为存在任意的跳转边，算法必须不断扫描 Block，处理各种可能的路径汇聚。
+* 结构化分析： 许多分析可以转化为对 Region Tree 的递归。对于 scf.for，我们知道它只有一个入口和一个出口，且迭代逻辑被高度封装。在做某些保守估计（Conservative Analysis）时，我们只需要分析一次 Region 内部逻辑，然后结合 iter_args 的类型信息，就能直接得出结论，而不需要反复模拟循环的跳转。
+
+**4. 转换与变换的鲁棒性**
+
+假设你想做一个 循环不变量外提 (LICM)：
+
+* 在 CFG 中： 你需要小心翼翼地移动指令，并确保不破坏原本复杂的 phi 结构，还要处理各种循环出口处的副作用。
+* 在 MLIR 中： 循环是一个独立的 Op。如果一个指令不依赖于 scf.for 的迭代变量或 iter_args，你可以直接将其物理性地移动到 scf.for 之前。这种基于“块”的操作比基于“边”的操作要安全得多。
+
+**总结**
+
+这种建模方式降低难度，本质上是因为它引入了更多的结构化约束。
+
+通过限制控制流的自由度（不允许任意跳转，必须成对出现 if-else 或循环边界），MLIR 将原本需要通过图算法才能推导出的信息，直接固化到了 IR 的拓扑结构中。对于分析程序来说，这意味着它看到的不再是杂乱无章的“电线”（CFG 边），而是一个个功能明确的“逻辑闸”（Structured Ops）。
+____
+

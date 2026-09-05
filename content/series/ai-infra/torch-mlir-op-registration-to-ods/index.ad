@@ -1,0 +1,472 @@
+---
+title: "从 PyTorch Schema 到 torch-mlir ODS"
+date: 2026-07-09
+tags: ["ai-infra", "pytorch", "torch-mlir", "mlir"]
+draft: true
+---
+
+本文记录一个 `aten` op 从 PyTorch 注册、被 JIT registry 发现，到最终生成 torch-mlir ODS 和 C++ accessor 的完整路径。例子使用 `aten::empty_permuted`。
+
+核心结论先放在前面：`AtenEmptyPermutedOp` 的 operand 名，例如 `size`、`physical_layout`、`dtype`、`layout`、`device`、`pin_memory`，源头是 PyTorch 的 `native_functions.yaml` 里的 schema 参数名。torch-mlir 的 `torch_ods_gen.py` 中写的
+
+[source,python]
+----
+emit("aten::empty_permuted : (int[], int[], int?, int?, Device?, bool?) -> (Tensor)")
+----
+
+只用于按类型签名匹配 PyTorch registry 中的 op；这个字符串本身并不提供 operand 名。真正的名字来自 PyTorch `c10::FunctionSchema` 中的 `Argument::name()`，随后被 torch-mlir 原样透传进 ODS。
+
+== 总览
+
+整个链路可以压缩成下面这条路径：
+
+[source,text]
+----
+aten/src/ATen/native/native_functions.yaml
+  -> torchgen.model.FunctionSchema / Argument
+  -> torchgen.gen.RegisterSchema
+  -> generated RegisterSchema.cpp: TORCH_LIBRARY(aten, m) { m.def("..."); }
+  -> c10 Dispatcher: OperatorHandle + FunctionSchema
+  -> torch/csrc/jit/runtime/register_c10_ops.cpp
+  -> torch::jit::OperatorRegistry
+  -> torch::jit::getAllOperators()
+  -> torch-mlir _jit_ir_importer.get_registered_ops()
+  -> torch-mlir Registry / JitOperator
+  -> torch_ods_gen.py
+  -> GeneratedTorchOps.td
+  -> TableGen generated TorchOps.h.inc / TorchOps.cpp.inc
+----
+
+如果一个新 op 在 torch-mlir 中没有生成对应的 `AtenXxxOp` 类，最常见的原因不是 C++ lowering 写错，而是 ODS 没有重新生成，或者 `torch_ods_gen.py` 里用于匹配 registry 的类型签名和当前 PyTorch schema 不一致。
+
+== 1. PyTorch schema 的源头
+
+`aten::empty_permuted` 在 PyTorch 中的声明来自：
+
+[source,yaml]
+----
+# aten/src/ATen/native/native_functions.yaml
+- func: empty_permuted(SymInt[] size, int[] physical_layout, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: empty_permuted_symint
+  autogen: empty_permuted.out
+----
+
+这里有两类信息：
+
+. 类型信息：`SymInt[]`、`int[]`、`ScalarType?`、`Layout?`、`Device?`、`bool?`、`Tensor`。
+. 名字信息：`size`、`physical_layout`、`dtype`、`layout`、`device`、`pin_memory`。
+
+后面 torch-mlir 生成的 ODS operand 名就是第二类信息。
+
+注意 `prims::empty_permuted` 是另一个 schema：
+
+[source,text]
+----
+prims::empty_permuted(SymInt[] shape, int[] physical_layout, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor
+----
+
+所以它的参数名是 `shape`、`physical_layout`、`dtype`、`device`、`requires_grad`。这和 `aten::empty_permuted` 的 `size`、`pin_memory` 不同，因为二者本来就是不同 schema。
+
+== 2. torchgen 如何把 YAML 变成 dispatcher schema
+
+PyTorch 的 codegen 会解析 `native_functions.yaml`。
+
+在 `torchgen/model.py` 中，`FunctionSchema.parse` 负责解析整条 `func:` 字符串：
+
+[source,python]
+----
+name = OperatorName.parse(ops)
+arguments = Arguments.parse(args)
+returns = parse_returns(return_decl)
+r = FunctionSchema(name=name, arguments=arguments, returns=returns)
+----
+
+对于单个参数，`Argument.parse` 通过最后一个空格切开 `type_and_annot` 和 `name`：
+
+[source,python]
+----
+type_and_annot, name_and_default = arg.rsplit(" ", 1)
+name = name_and_default
+----
+
+对于 `int[] physical_layout`，解析结果就是：
+
+[source,text]
+----
+type = int[]
+name = physical_layout
+----
+
+随后 `torchgen/gen.py` 中的 `RegisterSchema` 把 `FunctionSchema` 打印成 C++ schema 字符串：
+
+[source,python]
+----
+return f"m.def({cpp_string(str(f.func))}, {{}});\n"
+----
+
+生成的 `RegisterSchema.cpp` 会放到模板中的 `TORCH_LIBRARY(aten, m)`：
+
+[source,cpp]
+----
+namespace at {
+TORCH_LIBRARY(aten, m) {
+  ${aten_schema_registrations};
+}
+}
+----
+
+也就是说，`native_functions.yaml` 中的 schema 会作为字符串注册给 c10 dispatcher。
+
+== 3. dispatcher op 如何进入 JIT operator registry
+
+JIT 侧有一个 c10 dispatcher registration listener：
+
+[source,cpp]
+----
+// torch/csrc/jit/runtime/register_c10_ops.cpp
+void onOperatorRegistered(const c10::OperatorHandle& op) override {
+  torch::jit::registerOperator(createOperatorFromC10(op));
+}
+----
+
+`createOperatorFromC10` 只是把 `c10::OperatorHandle` 包装成一个 JIT `Operator`：
+
+[source,cpp]
+----
+Operator createOperatorFromC10(const c10::OperatorHandle& op) {
+  return Operator(op, [op](Stack& stack) { op.callBoxed(stack); });
+}
+----
+
+对于这种 C10 op，JIT `Operator::schema()` 直接返回 dispatcher handle 上的 schema：
+
+[source,cpp]
+----
+const FunctionSchema& schema() const {
+  return std::visit(
+      c10::overloaded(
+          [](const C10Operator& op) -> const FunctionSchema& {
+            return op.handle_.schema();
+          },
+          ...),
+      op_);
+}
+----
+
+因此，JIT registry 里看到的 `aten::empty_permuted` schema 仍然是 dispatcher 中的那份 `FunctionSchema`，参数名也没有被改写。
+
+== 4. `operator.cpp:214-222` 做了什么
+
+如果从 `torch/csrc/jit/runtime/operator.cpp:214-222` 开始看，会看到：
+
+[source,cpp]
+----
+const std::vector<std::shared_ptr<Operator>> getAllOperators() {
+  ensurePendingOperatorsFlushed();
+  std::shared_lock<std::shared_mutex> reader(lock);
+  std::vector<std::shared_ptr<Operator>> values;
+  for (const auto& kv : operators) {
+    values.insert(values.end(), kv.second.begin(), kv.second.end());
+  }
+  return values;
+}
+----
+
+这段代码只做两件事：
+
+. flush pending registrations；
+. 把 `operators` map 中的 `Operator` 收集成 vector 返回。
+
+它不解析 schema，也不生成参数名。参数名已经在更早的 `FunctionSchema` 中存在了。
+
+Python 暴露的 `_jit_get_all_schemas` 也是同样思路：调用 `getAllOperators()`，然后对每个 `Operator` 返回 `op->schema()`。
+
+[source,cpp]
+----
+m.def("_jit_get_all_schemas", []() {
+  const std::vector<std::shared_ptr<Operator>>& operations = getAllOperators();
+  return fmap(operations, [](const std::shared_ptr<Operator>& op) {
+    return op->schema();
+  });
+});
+----
+
+== 5. torch-mlir 如何读取 JIT registry
+
+torch-mlir 的 `_jit_ir_importer` C++ extension 会遍历 PyTorch JIT registry：
+
+[source,cpp]
+----
+for (const std::shared_ptr<torch::jit::Operator>& op :
+     torch::jit::getAllOperators()) {
+  const c10::FunctionSchema& schema = op->schema();
+  ...
+}
+----
+
+然后对每个 schema argument 生成一个 Python dict：
+
+[source,cpp]
+----
+auto addArgument = [](py::list& container, const c10::Argument& arg) {
+  py::dict argRecord;
+  argRecord["name"] = arg.name();
+  argRecord["type"] = arg.type()->str();
+  argRecord["pytype"] = arg.type()->annotation_str();
+  ...
+  container.append(std::move(argRecord));
+};
+----
+
+这行是 torch-mlir operand 名的直接来源：
+
+[source,cpp]
+----
+argRecord["name"] = arg.name();
+----
+
+对于当前 PyTorch 中的 `aten::empty_permuted`，`get_registered_ops()` 返回的关键内容类似：
+
+[source,python]
+----
+{
+  "name": ("aten::empty_permuted", ""),
+  "is_c10_op": True,
+  "arguments": [
+    {"name": "size", "type": "int[]", "pytype": "List[int]"},
+    {"name": "physical_layout", "type": "int[]", "pytype": "List[int]"},
+    {"name": "dtype", "type": "int?", "pytype": "Optional[int]", "default_debug": "None"},
+    {"name": "layout", "type": "int?", "pytype": "Optional[int]", "default_debug": "None"},
+    {"name": "device", "type": "Device?", "pytype": "Optional[Device]", "default_debug": "None"},
+    {"name": "pin_memory", "type": "bool?", "pytype": "Optional[bool]", "default_debug": "None"},
+  ],
+  "returns": [
+    {"name": "", "type": "Tensor", "pytype": "Tensor"},
+  ],
+}
+----
+
+这里可以看到一个重要的规范化：PyTorch schema 中的 `SymInt[]` 在 torch-mlir registry key 中会表现为 `int[]`；`ScalarType?`、`Layout?` 这类 enum-like 类型会表现为 `int?`。因此在 `torch_ods_gen.py` 中匹配 op 时，应该写 torch-mlir 归一化后的类型：
+
+[source,python]
+----
+emit("aten::empty_permuted : (int[], int[], int?, int?, Device?, bool?) -> (Tensor)")
+----
+
+而不是直接写 PyTorch schema 原文。
+
+== 6. `emit(...)` 如何选中 op，但不提供参数名
+
+`torch_ods_gen.py` 中的 `emit(...)` 会调用 `registry.assert_key_in_registry(key)`，按 unique key 找到对应的 `JitOperator`。
+
+这个 unique key 在 `registry.py` 中由类型构造：
+
+[source,python]
+----
+arg_str = ", ".join(arg["type"] for arg in self.arguments)
+ret_str = ", ".join(ret["type"] for ret in self.returns)
+return f"{self.namespace}::{self.unqualified_name}{overload} : ({arg_str}) -> ({ret_str})"
+----
+
+注意这里没有使用 `arg["name"]`。所以 `emit("aten::empty_permuted : (...) -> (...)")` 的作用只是选中 registry 中那条 op 记录。
+
+选中之后，完整的 `JitOperator` 对象仍然保留了 `arguments` 列表，每个 argument 里都有 name。
+
+== 7. ODS operand 名在哪里生成
+
+真正写入 ODS 的地方在 `torch_ods_gen.py` 的 `raw_emit_op`：
+
+[source,python]
+----
+p_td(
+    ",\n".join(
+        [
+            f"""{get_ods_type(arg["type"], is_non_value_op)}:${arg["name"]}"""
+            for arg in operator.arguments
+        ]
+    )
+)
+----
+
+也就是说，`arg["name"]` 会被直接拼成 ODS operand：
+
+[source,tablegen]
+----
+AnyTorchListOfTorchIntType:$size,
+AnyTorchListOfTorchIntType:$physical_layout,
+AnyTorchOptionalIntType:$dtype,
+AnyTorchOptionalIntType:$layout,
+AnyTorchOptionalDeviceType:$device,
+AnyTorchOptionalBoolType:$pin_memory
+----
+
+当前生成的 `GeneratedTorchOps.td` 中，对应片段是：
+
+[source,tablegen]
+----
+def Torch_AtenEmptyPermutedOp : Torch_Op<"aten.empty_permuted", [
+    AllowsTypeRefinement,
+    HasValueSemantics,
+    ReadOnly
+  ]> {
+  let summary = "Generated op for `aten::empty_permuted : (int[], int[], int?, int?, Device?, bool?) -> (Tensor)`";
+  let arguments = (ins
+    AnyTorchListOfTorchIntType:$size,
+    AnyTorchListOfTorchIntType:$physical_layout,
+    AnyTorchOptionalIntType:$dtype,
+    AnyTorchOptionalIntType:$layout,
+    AnyTorchOptionalDeviceType:$device,
+    AnyTorchOptionalBoolType:$pin_memory
+  );
+  let results = (outs
+    AnyTorchOptionalTensorType:$result
+  );
+}
+----
+
+== 8. TableGen 再生成 C++ accessor
+
+ODS 中的 `$physical_layout` 会被 MLIR TableGen 转成 C++ accessor，例如：
+
+[source,cpp]
+----
+static constexpr int odsIndex_physical_layout = 1;
+
+::mlir::TypedValue<::mlir::torch::Torch::ListType> getPhysicalLayout() {
+  return ::llvm::cast<::mlir::TypedValue<::mlir::torch::Torch::ListType>>(
+      *getODSOperands(1).begin());
+}
+----
+
+同理：
+
+[source,cpp]
+----
+$size           -> getSize()
+$physical_layout -> getPhysicalLayout()
+$dtype          -> getDtype()
+$layout         -> getLayout()
+$device         -> getDevice()
+$pin_memory     -> getPinMemory()
+----
+
+这就是为什么在 C++ lowering 中可以写：
+
+[source,cpp]
+----
+op.getSize()
+op.getPhysicalLayout()
+op.getDtype()
+op.getLayout()
+op.getDevice()
+op.getPinMemory()
+----
+
+== 9. 调试 checklist
+
+如果添加一个新 op 后，torch-mlir build 时报类似：
+
+[source,text]
+----
+unknown type name 'AtenEmptyPermutedOp'
+----
+
+可以按下面顺序排查。
+
+=== 9.1 确认 PyTorch 当前 schema
+
+[source,sh]
+----
+python - <<'PY'
+import torch
+print(torch.ops.aten.empty_permuted.default._schema)
+PY
+----
+
+输出应该类似：
+
+[source,text]
+----
+aten::empty_permuted(SymInt[] size, int[] physical_layout, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+----
+
+=== 9.2 确认 torch-mlir registry key 归一化后的类型
+
+[source,sh]
+----
+python - <<'PY'
+from torch_mlir._mlir_libs._jit_ir_importer import get_registered_ops
+
+for record in get_registered_ops():
+    if record["name"] == ("aten::empty_permuted", ""):
+        print(record)
+        break
+PY
+----
+
+看 `arguments[*]["type"]`，而不是只看 PyTorch schema 原文。`torch_ods_gen.py` 的 `emit(...)` 要匹配的是这里的归一化类型。
+
+=== 9.3 确认 `GeneratedTorchOps.td` 已经重新生成
+
+[source,sh]
+----
+rg -n "empty_permuted|AtenEmptyPermuted" include/torch-mlir/Dialect/Torch/IR/GeneratedTorchOps.td
+----
+
+如果没有命中，说明还没有运行 ODS 生成，或者 `emit(...)` 没有成功匹配 registry。
+
+=== 9.4 确认 TableGen 产物里有 accessor
+
+[source,sh]
+----
+rg -n "AtenEmptyPermutedOp|getPhysicalLayout" build/tools/torch-mlir/include/torch-mlir/Dialect/Torch/IR/TorchOps.h.inc
+----
+
+如果 `GeneratedTorchOps.td` 有 op，但 `TorchOps.h.inc` 没有，通常是 build 没有重新触发 TableGen。
+
+== 10. 常见误区
+
+=== `operator.cpp:214-222` 不生成参数名
+
+它只是枚举并返回已经注册的 JIT `Operator`。参数名来自 `Operator::schema()`，而 c10 op 的 schema 又来自 dispatcher。
+
+=== `torch_ods_gen.py` 的 `emit(...)` 不提供参数名
+
+`emit(...)` 的 key 只包含类型，不包含参数名。参数名保存在 registry 返回的 `operator.arguments` 里。
+
+=== PyTorch schema 原文不能总是直接复制到 torch-mlir key
+
+torch-mlir registry 会做类型归一化。例如：
+
+[source,text]
+----
+SymInt[]      -> int[]
+ScalarType?   -> int?
+Layout?       -> int?
+MemoryFormat? -> int?
+----
+
+所以 `aten::empty_permuted` 在 torch-mlir 中应该写成：
+
+[source,python]
+----
+emit("aten::empty_permuted : (int[], int[], int?, int?, Device?, bool?) -> (Tensor)")
+----
+
+=== `aten::empty_permuted` 和 `prims::empty_permuted` 不共享参数名
+
+二者是不同 namespace 下的不同 schema。`aten` 版本使用 `size` 和 `pin_memory`，`prims` 版本使用 `shape` 和 `requires_grad`。
+
+== 11. 对添加新 op 的实际启发
+
+添加一个 torch-mlir op 时，推荐流程是：
+
+. 先用当前 PyTorch 确认真实 schema。
+. 用 `_jit_ir_importer.get_registered_ops()` 确认 torch-mlir 看到的归一化 key 和 argument names。
+. 在 `torch_ods_gen.py` 里添加 `emit(...)`，注意使用归一化后的类型。
+. 运行 ODS 生成，更新 `GeneratedTorchOps.td`。
+. build，让 TableGen 生成 `TorchOps.h.inc` / `TorchOps.cpp.inc`。
+. 在 lowering 中使用生成的 accessor，例如 `op.getPhysicalLayout()`。
+
+这条链路中，参数名只在一个地方真正产生：PyTorch schema。torch-mlir 只是读取、保存、再输出。

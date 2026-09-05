@@ -1,0 +1,27 @@
+---
+title: "将 SV/RTL 方言降级为 VM 方言"
+summary: "如题"
+tags: ["compiler", "verilog", "systemverilog", "simulation", "simulator"]
+---
+
+== 生成虚函数表
+
+编译期一项非常重要的工作是生成虚函数表，流程如下：
+
+. 生成虚函数表，维护临时的 task/func 名字引用
+. 将所有的 task/func 提升到 module 级，并进行 name mangling
+. 将 1 中临时的名字引用替换为 2 的结果
+. 进行 lowering 的其他部分
+
+为什么要这么做？有几点原因：
+
+- 虚函数表不应该是 SV 方言的一部分，因为它对与 SV 方言没有意义——SV 方言中只需要知道被调用函数的名字，不需要知道真正被调用的函数实体，而且过早生成还会导致后续 name mangling 复杂；虚函数表可以派上用场的地方是去虚化（英文叫 de-virtualization，即根据类层次结构，剔除掉虚函数调用），但是它带来的收益可能没法补偿前面提到的代价
+- VM 方言的信息不足推断虚函数表，VM 方言只关心类的内存布局（``vm.class_layout``），里面不会包含 task/func 等信息
+- 架构的清晰度，不应该在 lowering 到 VM 的同时生成虚函数表
+
+[quote,SystemVerilog 和 MLIR 的符号表管理]
+____
+在为 SystemVerilog 设计 MLIR 方言时，其实有一个很有意思的点，就是符号表的管理。为什么这么说呢？因为 SystemVerilog 有一个极其特殊的语法结构——XMR。比如，某个 module 有一个 XMR ``tb_top.u_dut.blk.x``，直觉上 dut_top 应该有一个三层嵌套的符号表：@dut_top → @blk → @x，但是 CIRCT 中只有两层，通过 InnerRefAttr 表示：``[@dut_top, @x]``。这样做的原因是 dut_top 可能被内联到 tb_top 中，如果按照直觉的做法，会导致符号引用管理的困难。
+
+私以为 MLIR 基于字符串的符号管理其实是有一定局限性的，对于上面的应用场景，在传统的 ref 直接通过指针指向 sym 的 IR 中，实际上会做两件事：用新的名字创建一个新的符号，用新符号替换旧符号的所有引用，第二步是比较“结构化”的——可以通过 def-use 链或者遍历 AST 比较指针精确地找到 sym 所有的引用。而在 MLIR 中，第二步就会比较复杂：没有 def-use 链，也可能无法精确地通过遍历 IR 找到所有的引用。另外，CIRCT 的表示方式也有一定的局限性，它压缩了信息，如果 dut_top 有两个 begin..end，名字分别为 blk1 和 blk2，各包含一个名字为 x 的静态生命周期变量，那么 InnerRefAttr 应该如何区分 ``dut_top.blk1.x`` 和 ``dut_top.blk2.x``？恐怕只有用重命名做文章——变成 ``[@dut_top, @blk1_x]`` 和 ``[@dut_top, @blk2_x]``。
+____

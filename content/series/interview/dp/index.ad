@@ -1,0 +1,41 @@
+---
+title: "从换硬币入门动态规划"
+summary: "从换硬币的最简单场景开始，通过逐步增加约束，学习动态规划"
+tags: ["dynamic-programming"]
+---
+
+== 无限制换硬币
+
+参考 LeetCode 的 link:https://leetcode.cn/problems/coin-change/[322. 零钱兑换]
+
+一个直观的想法是，假设当前余额为 ``B``，对于硬币面额 ``c``，计算：
+
+$$F(B) = \sum_{c} F(b-c)$$
+
+但其实这有一个很大的问题，就是重复计数。例如 ``B=3``、硬币面额为 ``{1, 2}`` 时，有两种方案：1+1+1 和 1+2，但是上面的公式会产生路径：
+
+- `F(3) = F(2) + F(1)`
+- `F(3) = F(1) + F(2) + F(1)`
+
+所以，我们需要一种方式编码“一种组合是唯一的”这个信息。一种方式是保证访问硬币面额的顺序是非递减的：
+
+[source,py]
+----
+def solve(coins: [int], target: int):
+    def helper(curr: int, i: int):
+        if curr == target:
+            return 1
+        if i >= len(coins):
+            return 0
+        ans = 0
+        while curr <= target:
+            ans += helper(curr, i+1)
+            curr += coins[i]
+        return ans
+    return helper(0, 0)
+----
+
+但是这种办法实在是太慢，在我的机器上 `target=300` 时就已经比较慢了，原因是重复计算。我们来看看 `target=5` 时的依赖图：
+
+
+我们可以采用一种称作“记忆化”的技术来改啥呢

@@ -1,0 +1,71 @@
+---
+title: "第 3.b 讲：STL "
+summary: "介绍标准模板库（Standard Template Library，STL）的常用工具"
+draft: true
+---
+
+== 分配器 | Allocator
+
+=== 仅在栈上分配的 `std::vector`
+
+我们可以通过定制分配器得到一个仅在栈上分配的 allocator：
+
+[source,cpp]
+----
+template <typename T>
+struct StackAllocator {
+    using value_type = T;
+    using reference = value_type&;
+    using pointer = value_type*;
+    using const_reference = const value_type&;
+
+    static constexpr std::size_t N = 1024;
+
+    // template <typename U>
+    // struct rebind { using other = StackAllocator<T, N>; };
+
+    static constexpr std::size_t kAlignedSlotSize = sizeof(T);
+
+    std::byte mem [kAlignedSlotSize * N];
+    std::byte *head = mem;
+
+    pointer allocate(std::size_t n) {
+        const auto end = std::end(mem);
+        if (end - head < n) {
+            std::terminate();
+        }
+        auto *ans = head;
+        head += n;
+        std::cout << "allocated " << n << " slot(s)\n";
+        return reinterpret_cast<std::byte*>(ans);
+    }
+
+    void deallocate(void *ptr, std::size_t) {
+        std::cout << "deallocated " << ptr << '\n';
+    }
+};
+----
+
+使用：
+
+[source,cpp]
+----
+int main() {
+    std::vector<int, StackAllocator<int>> xs(StackAllocator<int>{});
+    xs.push_back(1);
+    xs.push_back(2);
+    xs.push_back(3);
+    xs.push_back(4);
+}
+----
+
+会输出：
+
+----
+allocated 1 slot(s)
+allocated 2 slot(s)
+deallocated 0x7ffe316353d0
+allocated 4 slot(s)
+deallocated 0x7ffe316353d1
+deallocated 0x7ffe316353d3
+----

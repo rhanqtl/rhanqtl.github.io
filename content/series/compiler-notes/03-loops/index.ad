@@ -1,0 +1,26 @@
+---
+title: "循环优化"
+date: 2026-04-11
+tags: ["compiler", "llvm"]
+draft: true
+---
+
+== 术语
+
+下面是一个所谓的“canonical loop”：
+
+image::images/canon-loop.png[width="400px", align="center"]
+
+其中的矩形表示一个 basic block，概念解释如下：
+
+- preheader 不是循环的一部分，但是 dominate 循环，通常循环变量的初始化会放在这里
+- header 是循环的第一个 basic block，他 dominate 循环其他的 basic block
+- excluding 有一个不属于循环的后继
+- latch 有一条指向 header 的 back edge
+- exit 是 excluding 的后继
+
+需要注意的是这是概念上的区分，实际上一个 basic block 可能符合多个角色
+
+== LLVM API
+
+`LoopInfo` 和 `LoopBase` 是核心的 API，前者用于获取循环的信息，后者用于维护循环的信息
