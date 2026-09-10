@@ -93,16 +93,16 @@ params:
   title: "欢迎来到 rhanqtl 的个人网站！"
 
   socialIcons:
-  - name: "GitHub"
-    url: "https://github.com/rhanqtl"
-  - name: "StackOverflow"
-    url: "https://stackoverflow.com/users/11573272/rhanqtl"
-  - name: "Twitter"
-    url: "https://x.com/rhanqtl"
-  - name: "Reddit"
-    url: "https://www.reddit.com/user/rhanqtl/"
-  - name: "RSS"
-    url: "index.xml"
+    - name: "GitHub"
+      url: "https://github.com/rhanqtl"
+    - name: "StackOverflow"
+      url: "https://stackoverflow.com/users/11573272/rhanqtl"
+    - name: "Twitter"
+      url: "https://x.com/rhanqtl"
+    - name: "Reddit"
+      url: "https://www.reddit.com/user/rhanqtl/"
+    - name: "RSS"
+      url: "index.xml"
 
   fuseOpts:
     isCaseSensitive: false
