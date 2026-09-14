@@ -2,6 +2,7 @@
 title: "第 0x 节：RTL elaboration 和逻辑综合"
 summary: "如题"
 tags: ["compiler", "verilog", "systemverilog", "simulation", "simulator", "logic-synth"]
+draft: true
 ---
 
 == RTL elaboration

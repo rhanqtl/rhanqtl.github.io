@@ -2,6 +2,7 @@
 title: "第 00 章：前言"
 summary: "介绍本系列的内容和目标"
 tags: ["compiler", "verilog", "systemverilog", "simulation", "simulator"]
+draft: true
 ---
 
 == 技术路线

@@ -2,6 +2,7 @@
 title: "将 SV/RTL 方言降级为 VM 方言"
 summary: "如题"
 tags: ["compiler", "verilog", "systemverilog", "simulation", "simulator"]
+draft: true
 ---
 
 == 生成虚函数表
