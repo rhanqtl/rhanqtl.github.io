@@ -1,0 +1,172 @@
++++
+title = "x86 向量化指令"
+summary = "介绍 x86-64 的向量化指令"
+date = "2026-10-11"
++++
+
+== 什么是向量化
+
+按照 link:https://en.wikipedia.org/wiki/Flynn%27s_taxonomy[Flynn's Taxonomy]，计算机体系结构可以分为如下四种：
+
+- 单指令、单数据（Single Instruction, Single Data，简称为 SISD），一条指令处理一份数据
+- 单指令、多数据
+- 多指令、单数据
+- 多指令、多数据
+
+向量化是一种 SIMD 表现形式。
+
+== x86 的向量数据类型
+
+x86 中向量数据类型的命名约定为 ``__m<width>[<type>]``，其中：
+
+* `width` 可以是 64/128/256/512
+* `type` 可以为：
+  * 省略 – 单精度浮点
+  * `d` – 双精度浮点
+  * `i` – 有符号整数 8/16/32/64，注意到这里并没有进一步区分，而是由具体的指令决定
+
+.为什么不区分整数宽度?
+****
+x86 SIMD 寄存器本身没有元素类型，只有位宽，元素类型由指令决定，而 Intel Intrinsics 基本沿用了这种硬件模型。这样容易出错，但是有几个好处：
+
+* 贴近 ISA
+* 方便重新解释数据，同一个寄存器可以直接用于不同的操作：
+
+[source,cpp]
+----
+__m128i x = _mm_set1_epi32(0x12345678);
+
+// 作为 4 × int32 操作
+x = _mm_add_epi32(x, x);
+
+// 随后作为 16 × int8 操作
+x = _mm_shuffle_epi8(x, mask);
+----
+
+* 兼容历史接口 – SSE2 时代就采用了 ``__m128i``，之后 AVX2、AVX-512 延续了相同的设计风格。
+
+实际上 GCC 已经提供了更安全的接口：
+
+[source,cpp]
+----
+using int16x8 =
+    int16_t __attribute__((vector_size(16)));
+
+int16x8 a, b;
+int16x8 c = a + b;
+----
+****
+
+向量会存储在 xmm、ymm 和 zmm 寄存器中，取决于宽度：
+
+image:images/mm-regs.svg[]
+
+== x86 的向量化指令
+
+命名约定为 `+__mm[<vec-width>]_<op>_<type>+`，其中：
+
+* `vec-width` 为向量的宽度，可以是 64/128/256/512
+* `op` 是操作，例如 add/mul
+* `type` 是 vector 的类型：
+** `ss` – scalar single precision，一个单精度浮点
+** `sd` – scalar double precision，一个双精度浮点
+** `ps` - packed single precision，单精度浮点数组
+** `pd` - packed double precision，双精度浮点数组
+** `epi8`/`epi16`/`epi32`/`epi64` - 有符号数数组
+** `epu8`/`epu16`/`epu32`/`epu64` - 无符号数数组
+** `si128`/`si256`/`si512` - 用于不区分整数元素宽度的整向量操作
+
+NOTE: 当然有些组合是不合法的，这里只是给出一般情况。
+
+NOTE: 汇编指令的名字不适用上述命名规则，例如 `_mm_add_epi32` 对应于 ``PADDD``，其中 `PADDD` 的最后一个 D 表示 double-word（32-bit 整数），而不是 double-precision 浮点数。
+
+== 例子
+
+我们可以用 SSE/AVX 指令来加速 ``strlen``。基准程序如下：
+
+[source,cpp]
+----
+std::size_t my_strlen_base(const char *s) {
+  if (!s) return 0;
+  const char *p = s;
+  while (*p != '\0') p++;
+  return p - s;
+}
+----
+
+使用 SIMD 指令加速的版本如下：
+
+[source,cpp]
+----
+std::size_t my_strlen(const char *s) {
+  if (!s) return 0;
+  const char *p = s;
+  const auto zero = _mm256_setzero_si256();
+  while (true) {
+    const auto lo = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(p));  <1>
+    const auto hi = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(p + 32));
+    const auto combined = _mm256_min_epu8(lo, hi);
+    const std::uint32_t hits =
+        _mm256_movemask_epi8(_mm256_cmpeq_epi8(combined, zero));
+    if (hits != 0) {
+      const std::uint32_t mask_lo =
+          _mm256_movemask_epi8(_mm256_cmpeq_epi8(lo, zero));  <2>
+      if (mask_lo != 0) return (p - s) + __builtin_ctz(mask_lo);
+      return (p - s) + 32 + __builtin_ctz(hits);  <3>
+    }
+    p += 64;
+  }
+}
+----
+
+<1> 经过实测，我选择在一次迭代中检测 64 个字节，32 个字节的版本慢了 40%，128 字节的版本几乎持平
+<2> 如果 `hits` 不等于 0，说明遇到了一个 ``\0``，先检查是否来自 `lo`
+<3> 否则，来自 `hi`
+
+gcc 编译命令为 ``$$g++ -mavx -std=c++23 -O3 test.cpp$$``，这个版本的性能在我的机器上可以跟 `std::strlen` 相媲美，不过这个版本没有处理边界情况，所以实际上的性能应该会比 `std::strlen` 差一些。
+
+== C++26 的 `std::simd`
+
+前面的程序用 $$C++26$$ 的 `std::simd` 实现就是下面这个样子：
+
+[source,cpp]
+----
+
+#include <simd>
+#include <cstddef>
+
+namespace sx = std::simd;
+
+std::size_t my_strlen(const char* s) {
+    if (!s) return 0;
+
+    using Vec = sx::vec<unsigned char, 32>;
+
+    const auto* p =
+        reinterpret_cast<const unsigned char*>(s);
+    const auto* begin = p;
+
+    while (true) {
+        const auto lo = sx::unchecked_load<Vec>(p, 32);
+        const auto hi = sx::unchecked_load<Vec>(p + 32, 32);
+
+        const auto combined = sx::min(lo, hi);
+        const auto hits = combined == 0;
+
+        if (sx::any_of(hits)) {
+            const auto mask_lo = lo == 0;
+
+            if (sx::any_of(mask_lo))
+                return (p - begin) +
+                       sx::reduce_min_index(mask_lo);
+
+            return (p - begin) + 32 +
+                   sx::reduce_min_index(hits);
+        }
+
+        p += 64;
+    }
+}
+----
+
+gcc 编译命令为 ``$$g++ -std=c++26 test.cpp$$``。

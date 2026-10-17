@@ -8,5 +8,7 @@ cmake-build-*/
 
 *.out
 *.exe
+*.so
+a.out
 
 .azad

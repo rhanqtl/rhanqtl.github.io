@@ -50,6 +50,7 @@ markup:
   tableOfContents:
     # ordered: true
   asciidocExt:
+    workingFolderCurrent: true
     attributes:
       toc: left
       toclevels: '4'
