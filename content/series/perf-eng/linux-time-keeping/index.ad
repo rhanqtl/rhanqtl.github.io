@@ -1,15 +1,12 @@
-= Linux 时间体系详解：从 TSC、Clocksource 到 C++ chrono
-:toc: left
-:toclevels: 3
-:sectnums:
-:source-highlighter: rouge
-:icons: font
-:experimental:
-:stem: latexmath
++++
+title = "Linux 时间体系详解：从 TSC、Clocksource 到 C++ chrono"
+date = "2026-10-24"
+tags = ["perf-eng"]
+draft = true
+description = """在性能优化、低延迟系统和分布式程序中，「测量时间」不是一件简单的事。一次请求的端到端延迟、线程实际使用的 CPU 时间、CPU 执行的周期数、跨机器的事件时间戳，分别对应不同的指标。Linux 既有 `CLOCK_MONOTONIC` 等软件时钟，也有 TSC、PMU、RTC、PHC 等硬件机制；C++ 又提供了 `std::chrono` 抽象。
 
-在性能优化、低延迟系统和分布式程序中，「测量时间」不是一件简单的事。一次请求的端到端延迟、线程实际使用的 CPU 时间、CPU 执行的周期数、跨机器的事件时间戳，分别对应不同的指标。Linux 既有 `CLOCK_MONOTONIC` 等软件时钟，也有 TSC、PMU、RTC、PHC 等硬件机制；C++ 又提供了 `std::chrono` 抽象。
-
-本文从时间语义、硬件来源、Linux 内核实现和应用 API 四个角度建立完整的认知模型，并给出选择建议和可运行示例。
+本文从时间语义、硬件来源、Linux 内核实现和应用 API 四个角度建立完整的认知模型，并给出选择建议和可运行示例。"""
++++
 
 == 先分清：时间点、经过时间和资源消耗
 

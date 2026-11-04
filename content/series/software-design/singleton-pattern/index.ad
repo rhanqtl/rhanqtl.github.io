@@ -3,7 +3,6 @@ title: "浅析单例模式"
 date: 2025-12-09
 tags: ["design-patterns"]
 summary: "单例模式（Singleton Pattern）是一种常见的设计模式，本文将介绍其基本概念、实现方式及应用场景"
-draft: true
 ---
 
 == 引言
@@ -27,7 +26,7 @@ MyClass the_instance;
 #include "MyClass.h"
 ----
 
-这种方式最突出的问题在于，截止到今天（2025 年 12 月），$$C++$$ 并没有定义全局变量的初始化顺序，因此可能会出现访问未初始化的全局变量的问题；即使在当前 library/executable 中我们能控制初始化顺序，但在跨多个 library/executable 的情况下，这个问题就会变得更加复杂。
+这种方式最突出的问题在于，截止到今天（2025 年 12 月），$$C++$$ 并没有定义全局变量的初始化顺序，因此可能会出现访问未初始化的全局变量的问题；即使在当前 library/executable 中我们能控制初始化顺序，在跨多个 library/executable 的情况下，这个问题也会变得很复杂。
 
 == Nifty Counters
 
@@ -41,12 +40,13 @@ class MyClass { /* ... */ };
 class MyClassCounter {
  public:
   MyClassCounter() {
-    if (counter == 0) the_instance = new MyClass{};
-    ++counter;
+    if (counter == 0) {
+      the_instance = new MyClass;
+    }
+    counter++;
   }
   ~MyClassCounter() {
-    counter--;
-    if (counter == 0) {
+    if (counter != 0 && --counter == 0) {  <1>
       delete the_instance;
       the_instance = nullptr;
     }
@@ -65,6 +65,8 @@ std::size_t MyClassCounter::counter_ = 0;
 
 // User1.cpp and User2.cpp not changed
 ----
+
+<1> 特别注意这里 counter !
 
 这样还是比较麻烦
 
