@@ -1,0 +1,517 @@
+= Linux 时间体系详解：从 TSC、Clocksource 到 C++ chrono
+:toc: left
+:toclevels: 3
+:sectnums:
+:source-highlighter: rouge
+:icons: font
+:experimental:
+:stem: latexmath
+
+在性能优化、低延迟系统和分布式程序中，「测量时间」不是一件简单的事。一次请求的端到端延迟、线程实际使用的 CPU 时间、CPU 执行的周期数、跨机器的事件时间戳，分别对应不同的指标。Linux 既有 `CLOCK_MONOTONIC` 等软件时钟，也有 TSC、PMU、RTC、PHC 等硬件机制；C++ 又提供了 `std::chrono` 抽象。
+
+本文从时间语义、硬件来源、Linux 内核实现和应用 API 四个角度建立完整的认知模型，并给出选择建议和可运行示例。
+
+== 先分清：时间点、经过时间和资源消耗
+
+* *Civil / wall-clock time*：现实世界的日期和时刻，例如 `2026-10-24 14:45:00 +08:00`。用于日志、报表和跨系统约定的时间戳。
+* *Elapsed (wall) time*：开始到结束实际经过了多长时间。它是一个测量目标，不等同于特定的 `CLOCK_REALTIME`。
+* *Monotonic time*：不会向后跳变的本机时间基准，适合超时和耗时测量。
+* *CPU time*：进程或线程被记账的 CPU 执行时间。多线程进程的累计 CPU time 可能超过 elapsed time。
+* *Hardware ticks / cycles*：硬件计数器的变化量。TSC ticks 与处理器核心周期（core cycles）通常不是一回事。
+
+[TIP]
+====
+POSIX 的 `CLOCK_REALTIME` 中的 *REALTIME* 指系统日历时间，不是「硬实时」（hard real-time）或调度延迟保证。
+====
+
+可以将整套系统分成四层：
+
+[source,text]
+----
+需求与语义    真实时刻 / 运行耗时 / CPU 时间 / 指令数 / 同步误差
+       |
+应用 API      std::chrono / clock_gettime / getrusage / RDTSC / perf
+       |
+内核机制      timekeeping / clocksource / vDSO / 调度统计 / perf_event
+       |
+硬件计数源    TSC / ARM Generic Timer / HPET / RTC / PHC / PMU
+----
+
+这不是每一种 API 都必经的调用栈。例如 `RDTSC` 可直接读取硬件计数器，PMU 也有单独的性能事件路径。
+
+== Linux `clock_gettime()` 的主要时钟
+
+`clock_gettime(clockid_t, timespec*)` 是 Linux/POSIX 用户态时间读取的基础接口。`timespec.tv_sec` 是秒，`tv_nsec` 是余下的纳秒部分；以纳秒表示并不等于具有纳秒级的实际精度。
+
+[cols="2,3,3",options="header"]
+|===
+|Clock ID |语义 |典型用途
+|`CLOCK_REALTIME` |POSIX/Unix 日历时间；可以被手动设置或时间同步机制跳变 |日志、时间戳
+|`CLOCK_REALTIME_COARSE` |低分辨率的 realtime |不要求精确的频繁读取
+|`CLOCK_MONOTONIC` |不后退、不计系统 suspend；可能受 NTP 频率校正 |耗时、超时
+|`CLOCK_MONOTONIC_COARSE` |低分辨率的 monotonic |粗粒度计时
+|`CLOCK_MONOTONIC_RAW` |未经 NTP/`adjtime` 频率校正的原始单调时间；不计 suspend |时钟研究与底层 benchmark
+|`CLOCK_BOOTTIME` |与 monotonic 相近，但计入 suspend |包含休眠的超时
+|`CLOCK_TAI` |基于国际原子时标的系统时间 |时间同步应用
+|`CLOCK_PROCESS_CPUTIME_ID` |当前进程累计 CPU 时间 |CPU 消耗分析
+|`CLOCK_THREAD_CPUTIME_ID` |当前线程累计 CPU 时间 |线程 CPU 消耗分析
+|`CLOCK_REALTIME_ALARM`、`CLOCK_BOOTTIME_ALARM` |对应时间基准的唤醒型定时器 |系统 suspend 唤醒；可能需要额外权限
+|===
+
+核心区别：
+
+[cols="2,2,2,2",options="header"]
+|===
+|时钟 |可能因设置时间而跳变 |NTP 频率校正 |计算 suspend
+|`REALTIME` |是 |是 |是
+|`MONOTONIC` |否 |是 |否
+|`MONOTONIC_RAW` |否 |否 |否
+|`BOOTTIME` |否 |是 |是
+|`TAI` |系统维护的时间偏移/人为调整仍可能造成跳变 |是 |是
+|===
+
+NTP 调整需要区分 *step*（直接改动时钟偏移）和 *slew*（微调走时速度）。`CLOCK_MONOTONIC` 不会因 `CLOCK_REALTIME` 的 step 而跳变，但会受频率校正影响；`CLOCK_MONOTONIC_RAW` 则保留底层晶振自身的漂移，不能将「raw」误解为「绝对更准确」。
+
+=== POSIX 获取方法
+
+[source,cpp]
+----
+#include <cstdint>
+#include <ctime>
+#include <stdexcept>
+
+std::int64_t now_ns(clockid_t clock_id) {
+    timespec ts{};
+    if (clock_gettime(clock_id, &ts) != 0)
+        throw std::runtime_error("clock_gettime failed");
+    return std::int64_t{ts.tv_sec} * 1'000'000'000 + ts.tv_nsec;
+}
+
+int main() {
+    auto wall = now_ns(CLOCK_REALTIME);
+    auto elapsed_basis = now_ns(CLOCK_MONOTONIC);
+    auto raw = now_ns(CLOCK_MONOTONIC_RAW);
+    auto cpu = now_ns(CLOCK_THREAD_CPUTIME_ID);
+    (void)wall; (void)elapsed_basis; (void)raw; (void)cpu;
+}
+----
+
+这里对不同 clock 返回的数字只是存储方式相同，*不代表可以相互相减*。不同计时基准的起点与含义不同。
+
+== TSC：x86 的低开销时间戳计数器
+
+TSC（Time Stamp Counter）是 x86 架构提供的 64 位计数器，可用 `RDTSC` 或 `RDTSCP` 读取。其值是 *ticks*，不是纳秒或 Unix 时间。
+
+[source,cpp]
+----
+#include <cstdint>
+#include <x86intrin.h>
+
+std::uint64_t ticks = __rdtsc();
+----
+
+近似模型为：
+
+[stem]
+++++
+\mathrm{TSC}(t) \approx f_{\mathrm{tsc}} t + C
+++++
+
+因此：
+
+[stem]
+++++
+\Delta t_{\mathrm{ns}} \approx \frac{\Delta \mathrm{TSC} \cdot 10^9}{f_{\mathrm{tsc}}}
+++++
+
+其中 stem:[f_{\mathrm{tsc}}] 的单位为 Hz。不能简单用 `/proc/cpuinfo` 的 `cpu MHz` 作为这个频率：现代 CPU 的核心频率可以随着 Turbo Boost / DVFS 变化，而 invariant TSC 通常以与动态调频无关的恒定速率计数。
+
+=== TSC ticks 不等于 core cycles
+
+假设 TSC 频率为 2.5 GHz，核心在 4.5 GHz 运行了 1 微秒：TSC 大约增加 2,500 ticks，而核心时钟可能经过约 4,500 cycles。若要统计程序真正消耗的核心周期，应使用 PMU 的 `cycles` 事件，而不是直接称 TSC 差值为 CPU cycles。
+
+=== Constant、Nonstop 和 Invariant TSC
+
+* *Constant TSC*：TSC 速率不跟随通常的 P-state 动态调频改变。
+* *Nonstop TSC*：TSC 在通常的 CPU idle 状态下仍继续计数。
+* *Invariant TSC*：处理器架构对 TSC 在指定工作状态中的稳定计数速率作出承诺。
+
+Linux 的 `/proc/cpuinfo` 可能暴露 `constant_tsc`、`nonstop_tsc` 等特征；架构上的 invariant TSC 也可通过 CPUID 的相关特征位确认。但这些特征 *不保证* 跨 socket 的 TSC 基准完全同步，更不能无条件扩展到虚拟机迁移和所有异常平台。
+
+[source,bash]
+----
+grep -m1 -oE 'constant_tsc|nonstop_tsc|tsc_known_freq' /proc/cpuinfo
+----
+
+=== RDTSC、RDTSCP 和乱序执行
+
+直接用两次 `__rdtsc()` 围住短代码，测到的不一定是严格的指令边界：`RDTSC` 不是完整的序列化指令。一个常见的 x86 计时模式是：
+
+[source,cpp]
+----
+#include <cstdint>
+#include <x86intrin.h>
+
+std::uint64_t tsc_begin() {
+    _mm_lfence();
+    auto t = __rdtsc();
+    _mm_lfence();
+    return t;
+}
+
+std::uint64_t tsc_end() {
+    unsigned aux = 0;
+    auto t = __rdtscp(&aux);
+    _mm_lfence();
+    return t;
+}
+----
+
+这只是常见微基准实践，并非跨所有 x86 代际的通用序列化定理。`RDTSCP` 具有部分排序保证，可额外读取 `TSC_AUX`；如果要检查是否迁移 CPU，需要比较前后读取的 `AUX`，或设置 CPU affinity。短函数测试还需要测量基线开销、热身、多次采样，并防止编译器把被测逻辑优化掉。
+
+[IMPORTANT]
+====
+TSC 是*计时硬件来源*，不是自动完成跨机器同步、调频校准和误差估计的高层时钟。`RDTSC` 的低开销不能替代对测量语义的判断。
+====
+
+== Clocksource：内核如何把硬件 ticks 变成纳秒？
+
+Linux 的 *clocksource* 是底层硬件计数源抽象，可使用 TSC、HPET、ACPI PM timer、ARM Generic Timer 等设备。内核 timekeeping 维护转换系数、时间偏移和各个软件时钟。
+
+典型的固定点换算近似为：
+
+[source,text]
+----
+delta = (cycles_now - cycles_base) & mask;
+ns = base_ns + ((delta * mult) >> shift);
+----
+
+这里 `mult`/`shift` 负责 ticks 到纳秒的近似转换；实际内核实现还要处理时间校准及一致性问题。由此可见，`CLOCK_MONOTONIC` 和 `RDTSC` 可能读取同一个 TSC，但前者是经过内核 timekeeping 处理后的时间语义。
+
+=== 主要硬件来源
+
+[cols="2,2,3",options="header"]
+|===
+|来源 |平台 |说明
+|TSC |x86 |现代系统经常选用；读取开销小
+|HPET |PC |传统高精度事件计时器；读取通常较慢
+|ACPI PM Timer |PC |传统平台计数器
+|PIT |旧式 PC |较旧的计时设备
+|ARM Generic Timer |AArch64 |架构定义的计数器与计时器接口
+|其他 SoC Timer |嵌入式 |取决于硬件和驱动
+|===
+
+查看 Linux 当前选用的 clocksource：
+
+[source,bash]
+----
+cat /sys/devices/system/clocksource/clocksource0/current_clocksource
+cat /sys/devices/system/clocksource/clocksource0/available_clocksource
+----
+
+ARM64 上，在系统允许用户态读取的情况下，可以获取 virtual counter：
+
+[source,cpp]
+----
+#include <cstdint>
+
+std::uint64_t read_arm_counter() {
+    std::uint64_t ticks;
+    asm volatile("mrs %0, cntvct_el0" : "=r"(ticks));
+    return ticks;
+}
+----
+
+`CNTFRQ_EL0` 提供名义计数频率，`CNTVCT_EL0` 与 `CNTPCT_EL0` 对应不同的计数器视图。
+
+=== Clocksource、Clockevent、sched_clock 各司其职
+
+* `clocksource`：内核用什么计数源来*得知当前时间*。
+* `clockevent`：硬件在将来的某个时间点*触发事件或中断*。
+* `sched_clock()`：面向内核调度及追踪的低开销时间戳机制。
+
+例如 TSC 可以负责读时间，而 Local APIC Timer 或 TSC-deadline timer 负责通知 CPU 某个定时事件到期。「能纳秒级读时间」不等于「能纳秒级准时唤醒线程」。
+
+内核代码中还存在 `ktime_get_ns()`、`ktime_get_raw_ns()`、`ktime_get_real_ns()`、`ktime_get_boottime_ns()` 等接口。它们是内核 API，不是用户态 C++ 可直接调用的函数。
+
+== vDSO：为什么 `clock_gettime()` 可能非常快？
+
+现代 Linux 经常通过 vDSO（virtual Dynamic Shared Object）在用户态实现时间读取，无需每次发生系统调用。简化路径：
+
+[source,text]
+----
+clock_gettime()
+       |
+      libc
+       |
+       +-- vDSO 支持? -- yes --> 用户态读取计数器与时间数据
+       |
+       +-- no -----------------> syscall --> Linux kernel
+----
+
+vDSO 会借助共享时间数据及一致性检查，使用户态可以读到内核维护的换算信息。不同架构、clock ID 和内核版本的支持范围不同。
+
+因此，直接 `RDTSC` *可能* 比 `clock_gettime(CLOCK_MONOTONIC)` 更便宜，但不能想当然地认为后者必定需要高开销陷入内核。应在目标机器上实测。`strace` 看不到相应系统调用，也可能是因为走了 vDSO。
+
+== CPU time：程序「用了多少 CPU」？
+
+设单线程任务先计算 10 ms，再等待网络 90 ms：
+
+[cols="2,2",options="header"]
+|===
+|指标 |近似结果
+|Elapsed wall time |100 ms
+|TSC 折算耗时 |100 ms
+|Thread CPU time |10 ms
+|===
+
+若四个线程并行各计算 10 ms，则进程累计 CPU time 可能接近 40 ms，虽然对应阶段的 elapsed time 仍只有 10 ms。
+
+=== POSIX 和 ISO C++ 接口
+
+[source,cpp]
+----
+#include <ctime>
+#include <time.h>
+
+int main() {
+    timespec process{}, thread{};
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &process);
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &thread);
+
+    std::clock_t ticks = std::clock();
+    double process_cpu_seconds =
+        static_cast<double>(ticks) / CLOCKS_PER_SEC;
+    (void)process_cpu_seconds;
+}
+----
+
+`std::clock()` 来自 C 标准库，在 Linux 常见实现中度量进程 CPU 时间；不要把它当成 wall-clock 计时器。
+
+=== 用户态与内核态 CPU 时间
+
+[source,cpp]
+----
+#include <sys/resource.h>
+
+int main() {
+    rusage u{};
+    getrusage(RUSAGE_SELF, &u);
+    auto user_cpu = u.ru_utime;
+    auto kernel_cpu = u.ru_stime;
+    (void)user_cpu; (void)kernel_cpu;
+}
+----
+
+`RUSAGE_THREAD` 可用于当前线程（Linux 扩展）；对指定线程或进程，POSIX 还提供 `pthread_getcpuclockid()` 和 `clock_getcpuclockid()` 等途径。
+
+命令行可使用：
+
+[source,bash]
+----
+/usr/bin/time -v ./program
+----
+
+输出中的 `real`/`elapsed` 是经过时间，`user` 和 `sys` 是分别记账的 CPU 时间；多线程程序的 CPU 时间合计可以大于经过时间。
+
+== PMU：TSC ticks、core cycles、reference cycles、instructions
+
+硬件 Performance Monitoring Unit（PMU）提供另一类观察角度：
+
+* `cycles`：通常与核心运行周期相关，受目标架构和事件设置影响。
+* `ref-cycles`：参考周期，常用于减少动态核心频率影响；不应默认等价于 TSC ticks。
+* `instructions`：已退休指令数（retired instructions）。
+
+通过 Linux perf 读取：
+
+[source,bash]
+----
+perf stat -e cycles,ref-cycles,instructions ./program
+----
+
+可以计算：
+
+[stem]
+++++
+\mathrm{IPC}=\frac{\text{retired instructions}}{\text{core cycles}}
+++++
+
+Linux C 接口是 `perf_event_open()`，事件包括 `PERF_COUNT_HW_CPU_CYCLES`、`PERF_COUNT_HW_REF_CPU_CYCLES` 和 `PERF_COUNT_HW_INSTRUCTIONS`。它们没有 ISO C++ 标准等价 API。
+
+使用 PMU 时需检查事件权限、CPU 是否支持、per-thread/per-process/per-CPU 绑定、复用和 `time_enabled`/`time_running` 缩放。一个线程被抢占后，其 wall time 增长、TSC 继续增长，但归属于该线程的 PMU cycles 与 thread CPU time 通常不再累计。
+
+== RTC、UTC、TAI 和 PTP：现实时间与跨机器同步
+
+=== RTC 与 `CLOCK_REALTIME` 不是同一回事
+
+RTC（Real-Time Clock）是硬件日历时钟，常在机器关闭时依靠独立电源继续运行；开机后可帮助初始化系统日历时间。Linux 的 `CLOCK_REALTIME` 则由运行中的内核 timekeeping 维护，并可被 NTP 等服务校准。
+
+[source,bash]
+----
+sudo hwclock --show
+ls /dev/rtc*
+----
+
+用户态也可以通过 `/dev/rtc0` 和 `RTC_RD_TIME` ioctl 读取 RTC；标准 C++ 没有 RTC 专用 API。
+
+=== UTC、Unix time 和 TAI
+
+* *UTC*：民用时间标准，包含闰秒规则。
+* *Unix/POSIX time*：用 1970-01-01 00:00:00 UTC 起的秒数表达时间，POSIX 时间戳不单独表示闰秒。
+* *TAI*：连续原子时标；与 UTC 的偏移需按闰秒历史维护。
+
+Linux 可通过 `clock_gettime(CLOCK_TAI, ...)` 获取系统维护的 TAI 时标读数。它不表示服务器直接连接原子钟，精度仍取决于同步状态及相关配置。
+
+=== PHC、PTP 与硬件时间戳
+
+跨机器测量尤其需要关注 PTP（Precision Time Protocol）、网卡硬件时钟 PHC（PTP Hardware Clock）以及 hardware timestamping。Linux 常暴露 `/dev/ptp0` 等设备，可用动态 `clockid_t` 配合 `clock_gettime()` 读取受支持的 PHC。
+
+[WARNING]
+====
+两台机器的 `CLOCK_MONOTONIC` 值不能直接比较，TSC 也不会因为「分辨率高」就天然具有全局时间语义。分布式事件先后关系需要同步模型和明确的时钟误差界限。
+====
+
+== C++ chrono：有哪些标准时钟？
+
+[cols="2,1,3",options="header"]
+|===
+|C++ API |标准 |说明
+|`std::chrono::system_clock` |C++11 |可转换为日历时间；Linux 上通常对应 `CLOCK_REALTIME`
+|`std::chrono::steady_clock` |C++11 |单调时钟；Linux 主流实现通常对应 `CLOCK_MONOTONIC`
+|`std::chrono::high_resolution_clock` |C++11 |具体定义因实现而异，可能是其他时钟的别名
+|`std::chrono::utc_clock` |C++20 |支持闰秒语义的 UTC 时间尺度；实现支持情况需确认
+|`std::chrono::tai_clock` |C++20 |TAI 时间尺度；实现支持情况需确认
+|`std::chrono::gps_clock` |C++20 |GPS 时间尺度；实现支持情况需确认
+|`std::chrono::file_clock` |C++20 |文件时间尺度；不用于运行耗时测量
+|`std::clock()` |C/C++ |CPU 时间，而非 chrono 时钟
+|===
+
+[source,cpp]
+----
+#include <chrono>
+
+int main() {
+    using namespace std::chrono;
+    auto wall = system_clock::now();
+    auto t0 = steady_clock::now();
+    // Do work...
+    auto t1 = steady_clock::now();
+    auto duration = t1 - t0;
+    (void)wall; (void)duration;
+}
+----
+
+C++ 标准没有规定 `steady_clock` 必须使用某个 Linux `clockid_t`。并且 `high_resolution_clock` 并不自动意味着「最快」或「最适合测量」。
+
+特别注意，C++20 起 `system_clock` 的 epoch 按标准规定为 Unix epoch；`CLOCK_REALTIME` 与 `system_clock` 在现代 Linux 上通常具有相同的时间语义，但具体调用路径和分辨率仍是实现细节。
+
+== 还有哪些 Linux 时间与统计？
+
+[cols="2,3,3",options="header"]
+|===
+|概念 |意义 |常见获取方式
+|Uptime / boot elapsed |自启动以来的时间；是否包含 suspend 需辨别 |`/proc/uptime`、`CLOCK_BOOTTIME`
+|Scheduler runtime |任务实际在 CPU 上运行的累计时间 |`/proc/<pid>/schedstat`
+|Runqueue wait |已可运行但等待调度的时间 |`/proc/<pid>/schedstat`、sched tracepoint
+|Jiffies |传统内核定时节拍统计单位 |内核 `jiffies`、`/proc/stat` 等
+|高分辨率 timer |安排未来唤醒，不是时间源本身 |`timerfd_create()`、`clock_nanosleep()`
+|文件时间戳 |访问、修改和元数据变更时间 |`statx()`、`std::filesystem`
+|Time namespace |不同命名空间的 monotonic/boottime 偏移 |`time_namespaces(7)`、`/proc/*/timens_offsets`
+|===
+
+`HZ`（例如 1000）不能直接用来推算 `clock_gettime()` 精度。现代 Linux 的高分辨率 clocksource、tickless 和 hrtimer 是不同于传统 jiffies 的机制。
+
+Time namespace 还意味着：即使来自同一宿主机，不同时间命名空间中的 monotonic 绝对值也不一定具有直接可比性。
+
+== HPC 和低延迟应用：应该选哪一个？
+
+[cols="3,3,3",options="header"]
+|===
+|问题 |首选 |注意事项
+|函数、任务端到端耗时 |`std::chrono::steady_clock` |热身、多次采样、避免被编译优化
+|Linux 特定底层 elapsed 测量 |`CLOCK_MONOTONIC` 或 `CLOCK_MONOTONIC_RAW` |RAW 不等于更准确；解释 NTP 行为
+|极短代码路径的低开销采样 |TSC + 合适排序约束 |迁核、虚拟化、校准和采样开销
+|核心周期、IPC |PMU / `perf stat` |事件归属、复用和采样干扰
+|线程 CPU 消耗 |`CLOCK_THREAD_CPUTIME_ID` |不包含多数等待/阻塞时长
+|调度等待 |`schedstat` / tracing |需考虑配置与采样开销
+|日志、日历时间 |`system_clock` |可能跳变，不宜测耗时
+|包含系统 suspend 的超时 |`CLOCK_BOOTTIME` |C++ 标准库没有一一对应时钟
+|跨机器时间戳 |经过同步的 realtime / PHC |必须知道同步误差与漂移
+|定时唤醒 |`timerfd` / `clock_nanosleep` |精确时间读取不代表准时调度
+|===
+
+以分布式仿真器为例：某 worker 的 wall time 很高，但 thread CPU time 很低，可能主要在等待消息、同步屏障或 CPU 调度；若 thread CPU time 高、IPC 低，则应进一步检查缓存未命中、分支、访存和 pipeline stall 等 PMU 指标。这比单看一个「执行耗时」数字更能定位瓶颈。
+
+=== 一个最小测量示例（Linux x86-64）
+
+下面比较不同计时机制。它是 API 演示，而不是严格的微基准结果；采样区间并不完全相同。
+
+[source,cpp]
+----
+#include <chrono>
+#include <cstdint>
+#include <cstdio>
+#include <ctime>
+#include <x86intrin.h>
+
+std::int64_t ns(clockid_t id) {
+    timespec ts{};
+    if (clock_gettime(id, &ts) != 0) return -1;
+    return std::int64_t{ts.tv_sec} * 1'000'000'000 + ts.tv_nsec;
+}
+
+int main() {
+    using namespace std::chrono;
+    auto s0 = steady_clock::now();
+    auto r0 = ns(CLOCK_MONOTONIC_RAW);
+    auto c0 = ns(CLOCK_THREAD_CPUTIME_ID);
+
+    _mm_lfence();
+    auto t0 = __rdtsc();
+    _mm_lfence();
+
+    volatile std::uint64_t sum = 0;
+    for (std::uint64_t i = 0; i < 1'000'000; ++i)
+        sum = sum + i;
+
+    unsigned aux = 0;
+    auto t1 = __rdtscp(&aux);
+    _mm_lfence();
+
+    auto c1 = ns(CLOCK_THREAD_CPUTIME_ID);
+    auto r1 = ns(CLOCK_MONOTONIC_RAW);
+    auto s1 = steady_clock::now();
+
+    std::printf("steady:     %lld ns\n",
+        static_cast<long long>(duration_cast<nanoseconds>(s1 - s0).count()));
+    std::printf("raw:        %lld ns\n", static_cast<long long>(r1 - r0));
+    std::printf("thread CPU: %lld ns\n", static_cast<long long>(c1 - c0));
+    std::printf("TSC:        %llu ticks\n",
+        static_cast<unsigned long long>(t1 - t0));
+}
+----
+
+[NOTE]
+====
+上述 `volatile` 仅用于让示例中的循环保留可观察访问，*不是*可靠的通用 benchmark barrier；它本身会显著改变编译与执行行为。专业测量建议使用专门的 benchmark 框架或经验证的优化屏障，并进行统计分析。
+====
+
+== 总结
+
+Linux 的「时间」可以用三个问题来区分：
+
+. *它表示什么？* 现实日期、经过时间、CPU 占用、周期数，还是跨机器同步时间？
+. *它来自哪里？* TSC、ARM Timer、RTC、PHC、PMU，还是内核统计？
+. *如何读取？* `std::chrono`、`clock_gettime()`、`RDTSC`、`getrusage()` 或 `perf_event_open()`？
+
+对于通用 C++ 性能测试，`steady_clock` 是合适的起点。若瓶颈分析需要准确区分计算、等待和调度，应组合 wall time、thread CPU time 与 PMU 指标。只有在明确了计量目标、硬件稳定性与误差来源后，才值得进一步使用直接 TSC 读取。
+
+== 参考资料
+
+* https://man7.org/linux/man-pages/man3/clock_gettime.3.html[clock_gettime(3), Linux man-pages]
+* https://man7.org/linux/man-pages/man2/perf_event_open.2.html[perf_event_open(2), Linux man-pages]
+* https://docs.kernel.org/timers/timekeeping.html[Clock sources, Clock events, sched_clock() and delay timers — Linux kernel documentation]
+* https://man7.org/linux/man-pages/man7/vdso.7.html[vDSO(7), Linux man-pages]
+* https://man7.org/linux/man-pages/man7/time_namespaces.7.html[time_namespaces(7), Linux man-pages]
+* https://man7.org/linux/man-pages/man4/ptp.4.html[ptp(4), Linux man-pages]
+* https://en.cppreference.com/w/cpp/chrono.html[C++ chrono reference]

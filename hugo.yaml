@@ -1,5 +1,5 @@
 # Basic configuration
-baseURL: "https://blog.rhanqtl.com/"
+baseURL: "https://rhanqtl.com/"
 title: rhanqtl's blog
 author: rhanqtl
 theme: adoc-live
